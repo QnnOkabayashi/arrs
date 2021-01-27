@@ -26,9 +26,15 @@ where
                     "operands could not be broadcast together with shapes {} {}",
                     a, b
                 ),
-                Self::Reshape(a, b) => "cannot reshape: shapes don't have same volume".to_string(),
-                Self::FromNList(nlist) => "nested list dimensions not consistent".to_string(),
-                Self::FromIdxFile(file) => "couldn't create array from file".to_string(),
+                Self::Reshape(a, b) => format!(
+                    "cannot reshape: shapes have different volumes (a: {:?} -> {}, b: {:?} -> {})",
+                    a,
+                    a.volume(),
+                    b,
+                    b.volume()
+                ),
+                Self::FromNList(_) => "nested list dimensions not consistent".to_string(),
+                Self::FromIdxFile(_) => "couldn't create array from file".to_string(),
             }
         )
     }
