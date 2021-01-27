@@ -1,10 +1,10 @@
 use std::{cmp, fmt, result};
 
 #[derive(Debug, Clone)]
-pub struct Shape(Vec<usize>);
+pub struct Shape(Vec<isize>);
 
 impl Shape {
-    pub fn new(dims: Vec<usize>) -> Shape {
+    pub fn new(dims: Vec<isize>) -> Shape {
         Shape(dims)
     }
 
@@ -34,19 +34,15 @@ impl Shape {
         self.0.len()
     }
 
-    pub fn dim(&self, index: usize) -> Option<usize> {
-        if index < self.ndims() {
-            Some(self.0[index])
-        } else {
-            None
-        }
+    pub fn dim(&self, index: usize) -> isize {
+        self.0[index]
     }
 
-    pub fn volume(&self) -> usize {
+    pub fn volume(&self) -> isize {
         self.iter().product()
     }
 
-    fn iter(&self) -> impl Iterator<Item = &usize> {
+    fn iter(&self) -> impl Iterator<Item = &isize> {
         self.0.iter()
     }
 }
@@ -186,14 +182,14 @@ mod tests {
     #[test]
     fn test_volume1() {
         let a = Shape::new(vec![3, 256, 256]);
-        let expected = 3 * 256 * 256 as usize;
+        let expected = 3 * 256 * 256 as isize;
         assert_eq!(expected, a.volume());
     }
 
     #[test]
     fn test_volume2() {
         let a = Shape::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-        let expected = 1 * 2 * 3 * 4 * 5 * 6 * 7 * 8 * 9 * 10 as usize;
+        let expected = 1 * 2 * 3 * 4 * 5 * 6 * 7 * 8 * 9 * 10 as isize;
         assert_eq!(expected, a.volume());
     }
 }
