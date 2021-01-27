@@ -1,8 +1,8 @@
-use super::{dtype::TypeConscious, Array};
+use super::{dtype::TypeAware, Array};
 
 pub enum IndexItem<T>
 where
-    T: TypeConscious,
+    T: TypeAware,
 {
     Arr(Array<T>),
     Val(T),

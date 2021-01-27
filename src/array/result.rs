@@ -1,10 +1,10 @@
-use super::{dtype::TypeConscious, Array, NestedList};
 use super::shape::{CastError, Shape};
+use super::{dtype::TypeAware, Array, NestedList};
 use std::{fmt, fs, result};
 
 pub enum ArrayError<T>
 where
-    T: TypeConscious,
+    T: TypeAware,
 {
     Cast(CastError),
     Reshape(Shape, Shape),
@@ -14,7 +14,7 @@ where
 
 impl<T> fmt::Display for ArrayError<T>
 where
-    T: TypeConscious,
+    T: TypeAware,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
