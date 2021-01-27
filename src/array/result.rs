@@ -2,7 +2,8 @@ use super::shape::{CastError, Shape};
 use super::{dtype::TypeAware, Array, NestedList};
 use std::{fmt, fs, result};
 
-pub enum ArrayError<T>
+#[derive(Debug)]
+pub enum Error<T>
 where
     T: TypeAware,
 {
@@ -12,7 +13,7 @@ where
     FromNList(NestedList<T>),
 }
 
-impl<T> fmt::Display for ArrayError<T>
+impl<T> fmt::Display for Error<T>
 where
     T: TypeAware,
 {
@@ -33,7 +34,7 @@ where
     }
 }
 
-pub type ArrayResult<T> = result::Result<Array<T>, ArrayError<T>>;
+pub type ArrayResult<T> = result::Result<Array<T>, Error<T>>;
 
 mod tests {
     use super::*;
@@ -49,7 +50,7 @@ mod tests {
     #[test]
     fn test_tryfrom_nlist_error() {
         let nlist = NestedList::Value(50);
-        let err = ArrayError::<i32>::FromNList(nlist);
+        let err = Error::<i32>::FromNList(nlist);
         assert_eq!(
             format!("{}", err),
             format!("ArrayError: nested list dimensions not consistent")
