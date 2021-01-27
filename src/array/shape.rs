@@ -1,5 +1,6 @@
 use std::{cmp, fmt, result};
 
+// lowest dimensions are first
 #[derive(Debug, Clone)]
 pub struct Shape(Vec<isize>);
 
@@ -9,7 +10,7 @@ impl Shape {
     }
 
     pub fn cast(&self, other: &Shape) -> CastResult {
-        let mut dims = Vec::with_capacity(cmp::max(self.ndims(), other.ndims()));
+        let mut dims = Vec::with_capacity(cmp::max(self.ndims(), other.ndims()) as usize);
 
         let (mut lhs, mut rhs) = (self.iter(), other.iter());
 
@@ -30,19 +31,28 @@ impl Shape {
         Ok(Shape::new(dims))
     }
 
-    pub fn ndims(&self) -> usize {
-        self.0.len()
+    pub fn ndims(&self) -> isize {
+        self.0.len() as isize
     }
 
-    pub fn dim(&self, index: usize) -> isize {
-        self.0[index]
+    pub fn dim(&self, index: isize) -> isize {
+        // top condition is for testing purposes
+        // and must panic because it means there's an
+        // implementation error
+        if index > self.ndims() {
+            panic!("index: {}, ndims: {}", index, self.ndims())
+        } else if index >= 0 {
+            self.0[index as usize]
+        } else {
+            1
+        }
     }
 
     pub fn volume(&self) -> isize {
         self.iter().product()
     }
 
-    fn iter(&self) -> impl Iterator<Item = &isize> {
+    pub fn iter(&self) -> impl Iterator<Item = &isize> {
         self.0.iter()
     }
 }
