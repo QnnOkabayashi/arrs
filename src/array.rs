@@ -1,19 +1,20 @@
 mod cursor;
 mod dtype;
-mod indexitem;
+mod item;
 mod iter;
 mod nestedlist;
 mod result;
 mod shape;
 use cursor::ArrayCursor;
 use dtype::{DType, TypeAware};
-use indexitem::IndexItem;
+use item::Item;
 use iter::{ArrayIntoIterator, ArrayIterator, ArrayIteratorMut};
 use nestedlist::NestedList;
-use result::{ArrayError, ArrayResult};
+use result::{Error, ArrayResult};
 use shape::Shape;
-use std::{convert, fmt, fs, io, mem, rc};
+use std::{cmp, convert, fmt, fs, mem };
 
+#[derive(Debug)]
 pub struct Array<T>
 where
     T: TypeAware,
@@ -35,10 +36,6 @@ where
             Ok(shape) => {
                 let mut data = Vec::with_capacity(shape.volume() as usize);
 
-                // this seems like such a naive solution
-                let lhs_cursor = self.get_data_cursor();
-                let rhs_cursor = rhs.get_data_cursor();
-                
                 // TODO: implement once I know what I'm doing
 
                 // 4 x 1 . 1 x 3 => 4 x 3
@@ -58,44 +55,61 @@ where
                 // would be nice if we could just access a pointer within
                 // the vector and also a starting index
                 // or just have a pointer and a counter on how many times to iterate
-                // but I hate to have to create a struct every time...
-                // create a ArrayDimIterator struct that's super bare bones
 
-                fn operate_rec<T, F, R>(lhs: ArrayElement<T>, rhs: ArrayElement<T>, out: &mut Vec<R>, op: F)
+
+                fn operate_rec<'a, T, F, R>(a: Item<T>, b: Item<T>, data: &mut Vec<R>, op: &'a F)
                 where
                     T: TypeAware,
                     R: TypeAware,
                     F: Fn(T, T) -> R,
                 {
-                    if let (ArrayElement::Value(a), ArrayElement::Value(b)) = (lhs, rhs) {
-                        out.push(op(a, b));
+                    if a.ndims() == 0 && b.ndims() == 0 {
+                        // base case
+                        data.push(op(a.read(), b.read()));
+                    } else if a.ndims() == b.ndims() {
+                        if a.len() == b.len() {
+                            // linear case
+                            for n in 0..a.len() {
+                                operate_rec(a.at(n), b.at(n), data, op);
+                            }
+                        } else if a.len() == 1 {
+                            // stretch where a is 1
+                            for n in 0..b.len() {
+                                operate_rec(a.at(0), b.at(n), data, op);
+                            }
+                        } else {
+                            // stretch where b is 1
+                            for n in 0..a.len() {
+                                operate_rec(a.at(n), b.at(0), data, op);
+                            }
+                        }
+                    } else if a.ndims() < b.ndims() {
+                        // stretch where a is 1 padded
+                        for n in 0..b.len() {
+                            // copies a right now... how bad is this
+                            operate_rec(a, b.at(n), data, op);
+                        }
+                    } else {
+                        // stretch where b is 1 padded
+                        for n in 0..a.len() {
+                            operate_rec(a.at(n), b, data, op);
+                        }
                     }
                 }
+
+                let a = Item::new(self);
+                let b = Item::new(rhs);
+
+                operate_rec(a, b, &mut data, &op);
+
                 /*
                 Possibilities:
-                Value and Value
-                Array and Value
-                Arrays of the same rank and same len
-                Arrays of the same rank and different len
-                Arrays of different rank
+                Value and Value => base case
+                Arrays of the same rank and same len => linear case
+                Arrays of the same rank and different len => stretch where one is 1
+                Array and Value => stretch with 1 padding
+                Arrays of different rank => stretch with 1 padding
 
-                I can probably come up with some way that involves destructuring the enum
-                first to be more efficient rather than treating them all the same
-
-                // NEW ALGO PSEUDO CODE
-                value & value => base case
-                if same rank {
-                    // this if statement could probably be compressed
-                    if same len {
-                        // linear case
-                    } else {
-                        // stretch where one is 1
-                    }
-                } else {
-                    stretch 1 into n (Array and Value + Arrays of different rank)
-                }
-
-                // NEW ALGO
                 fn recursive(a: ArrayElement<T>, b: ArrayElement<T>, vec: &mut Vec<R>) {
                     if let (Value(a), Value(b)) = (a, b) {
                         // base case
@@ -170,7 +184,7 @@ where
 
                 Ok(Array { shape, data })
             }
-            Err(e) => Err(ArrayError::Cast(e)),
+            Err(e) => Err(Error::Cast(e)),
         }
     }
 
@@ -178,7 +192,7 @@ where
         &self.shape
     }
 
-    pub fn rank(&self) -> usize {
+    pub fn rank(&self) -> isize {
         self.shape().ndims()
     }
 
@@ -215,18 +229,13 @@ where
     //         cursor: self.get_data_cursor(),
     //     }
     // }
-}
 
-impl<T> Array<T>
-where
-    T: TypeAware + Copy,
-{
     pub fn reshape(self, shape: Shape) -> ArrayResult<T> {
         if self.shape.volume() == shape.volume() {
             let data = self.iter().copied().collect();
             Ok(Array { shape, data })
         } else {
-            Err(ArrayError::Reshape(self.shape().clone(), shape))
+            Err(Error::Reshape(self.shape().clone(), shape))
         }
     }
 
@@ -239,6 +248,18 @@ where
     //         })
     //     }
     // }
+}
+
+impl<T> cmp::PartialEq for Array<T>
+where
+    T: TypeAware + PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        // TODO: change these to self.iter() and other.iter() once ArrayIter is impl'd
+        let self_iter = self.data().iter();
+        let other_iter = other.data().iter();
+        self.rank() == other.rank() && self_iter.zip(other_iter).all(|(&a, &b)| a == b)
+    }
 }
 
 macro_rules! impl_array_cmp {
@@ -257,12 +278,12 @@ macro_rules! impl_array_cmp {
 }
 
 impl_array_cmp! {
-    eq: |a, b| a == b,
-    ne: |a, b| a != b,
-    lt: |a, b| a < b,
-    le: |a, b| a <= b,
-    gt: |a, b| a > b,
-    ge: |a, b| a >= b
+    v_eq: |a, b| a == b,
+    v_ne: |a, b| a != b,
+    v_lt: |a, b| a < b,
+    v_le: |a, b| a <= b,
+    v_gt: |a, b| a > b,
+    v_ge: |a, b| a >= b
 }
 
 macro_rules! impl_array_astype {
@@ -321,76 +342,80 @@ impl_array_astype! {
     astype_float64 for Float64 as f64
 }
 
-// iterators over each dimension
-// would be nice if I made pseudo-shapes so
-// that they match up nicely (equal size, 1-padded)
-// a struct where you give it an index, and it gives you
-// an iterator for that dim
+mod tests {
+    use super::*;
 
-// rename to "CastingSlice" or something
-// so it's clear that it "stretches" if it's a Value varient
-pub enum ArrayElement<'a, T>
-where
-    T: TypeAware,
-{
-    Array {
-        shape: &'a Shape,
-        ndims: usize,
-        pos: isize,
-        cursor: &'a mut ArrayCursor<'a, T>,
-    },
-    Value(T), // holds a copied value
-}
-
-impl<'a, T> ArrayElement<'a, T>
-where
-    T: TypeAware,
-{
-    fn ndims(&self) -> usize {
-        match self {
-            Self::Array { ndims, .. } => *ndims,
-            Self::Value(_) => 0,
-        }
+    fn make_array<T>(shape: Vec<isize>, data: Vec<T>) -> Array<T>
+    where
+        T: TypeAware,
+    {
+        let shape = Shape::new(shape);
+        assert!(shape.volume() == data.len() as isize);
+        Array { shape, data }
     }
 
-    fn len(&self) -> isize {
-        match self {
-            Self::Array { shape, ndims, .. } => shape.dim(ndims - 1),
-            Self::Value(_) => 1,
-        }
+    #[test]
+    fn test_eq1() {
+        let arr1 = make_array(vec![2,2], vec![0,1,2,3]);
+        let arr2 = make_array(vec![2,2], vec![0,1,2,3]);
+        assert_eq!(arr1, arr2);
     }
 
-    fn at(&'a self, index: isize) -> Option<ArrayElement<'a, T>> {
-        match self {
-            Self::Array { shape, ndims, cursor , .. } => {
-                if index < shape.dim(ndims - 1) {
-                    None
-                    // Some(if *ndims == 0 {
-                    //     ArrayElement::Value(cursor.read())
-                    // } else {
-                    //     ArrayElement::Array {
-                    //         shape,
-                    //         ndims: ndims - 1,
-                    //         pos: 0,
-                    //         cursor: *cursor,
-                    //     }
-                    // })
-                } else {
-                    None
-                }
-            },
-            Self::Value(_) => {
-                None
-                // Some(self)
-            },
-        }
+    #[test]
+    fn test_cast1() {
+        let arr1 = make_array(vec![1], vec![10]);
+        let arr2 = make_array(vec![4], vec![0,1,2,3]);
+        let expected = make_array(vec![4], vec![0,10,20,30]);
+
+        let op = |a, b| a * b;
+        let actual = arr1.operate(&arr2, op).unwrap();
+
+        assert_eq!(expected, actual);
     }
-}
 
+    #[test]
+    fn test_cast2() {
+        let arr1 = make_array(vec![1], vec![10]);
+        let arr2 = make_array(vec![2, 2], vec![0,1,2,3]);
+        let expected = make_array(vec![2, 2], vec![0,10,20,30]);
 
-#[test]
-fn test_compile() {
-    println!("It works!")
+        let op = |a, b| a * b;
+        let actual = arr1.operate(&arr2, op).unwrap();
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_cast3() {
+        let arr1 = make_array(vec![2], vec![0,1]);
+        let arr2 = make_array(vec![2,3], vec![0,1,2,3,4,5]);
+        let expected = make_array(vec![2,3], vec![0,1,0,3,0,5]);
+
+        let op = |a, b| a * b;
+        let actual = arr1.operate(&arr2, op).unwrap();
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_cast4() {
+        // [[[0 1]
+        //   [2 3]]
+        //
+        //  [[4 5]
+        //   [6 7]]]
+
+        // [[0]
+        //  [1]]
+        let arr1 = make_array(vec![2,2,2], vec![0,1,2,3,4,5,6,7]);
+        let arr2 = make_array(vec![1,2], vec![0,1]);
+        let expected = make_array(vec![2,2,2], vec![0,0,2,3,0,0,6,7]);
+
+        let op = |a, b| a * b;
+        let actual = arr1.operate(&arr2, op).unwrap();
+
+        assert_eq!(expected, actual);
+    }
 }
 
 impl<T> convert::From<Vec<T>> for Array<T>
@@ -407,7 +432,7 @@ impl<T> convert::TryFrom<NestedList<T>> for Array<T>
 where
     T: TypeAware,
 {
-    type Error = ArrayError<T>;
+    type Error = Error<T>;
 
     fn try_from(nlist: NestedList<T>) -> ArrayResult<T> {
         todo!()
@@ -418,7 +443,7 @@ impl<T> convert::TryFrom<fs::File> for Array<T>
 where
     T: TypeAware,
 {
-    type Error = ArrayError<T>;
+    type Error = Error<T>;
 
     fn try_from(f: fs::File) -> ArrayResult<T> {
         todo!()
