@@ -2,7 +2,7 @@ use std::{cmp, fmt, result};
 
 // lowest dimensions are first
 #[derive(Debug, Clone)]
-pub struct Shape(pub Vec<isize>);
+pub struct Shape(Vec<isize>);
 
 impl Shape {
     pub fn new(dims: Vec<isize>) -> Shape {
