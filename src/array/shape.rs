@@ -2,11 +2,15 @@ use std::{cmp, fmt, result};
 
 // lowest dimensions are first
 #[derive(Debug, Clone)]
-pub struct Shape(Vec<isize>);
+pub struct Shape(pub Vec<isize>);
 
 impl Shape {
     pub fn new(dims: Vec<isize>) -> Shape {
-        Shape(dims)
+        if dims.len() > 0 {
+            Shape(dims)
+        } else {
+            panic!("shape can't have 0 dims")
+        }
     }
 
     pub fn cast(&self, other: &Shape) -> CastResult {
@@ -36,15 +40,11 @@ impl Shape {
     }
 
     pub fn dim(&self, index: isize) -> isize {
-        // top condition is for testing purposes
-        // and must panic because it means there's an
-        // implementation error
-        if index > self.ndims() {
-            panic!("index: {}, ndims: {}", index, self.ndims())
-        } else if index >= 0 {
+        if 0 <= index && index < self.ndims() {
             self.0[index as usize]
         } else {
-            1
+            // testing purposes only
+            panic!("index: {}, ndims: {}", index, self.ndims())
         }
     }
 
@@ -52,7 +52,7 @@ impl Shape {
         self.iter().product()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &isize> {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &isize> {
         self.0.iter()
     }
 }
@@ -65,7 +65,11 @@ impl cmp::PartialEq for Shape {
 
 impl fmt::Display for Shape {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self.0)
+        write!(
+            f,
+            "{:?}",
+            self.0.iter().rev().copied().collect::<Vec<isize>>()
+        )
     }
 }
 
@@ -198,8 +202,14 @@ mod tests {
 
     #[test]
     fn test_volume2() {
-        let a = Shape::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-        let expected = 1 * 2 * 3 * 4 * 5 * 6 * 7 * 8 * 9 * 10 as isize;
+        let a = Shape::new((1..11).collect::<Vec<isize>>());
+        let expected = (1..11).product::<isize>();
         assert_eq!(expected, a.volume());
+    }
+
+    #[test]
+    fn test_display1() {
+        let a = Shape::new(vec![1, 2, 3, 4, 5]);
+        assert_eq!(a.to_string(), String::from("[5, 4, 3, 2, 1]"));
     }
 }
