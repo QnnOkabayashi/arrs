@@ -1,16 +1,16 @@
 mod dtype;
-mod item;
 mod iter;
 mod nestedlist;
 mod result;
 mod shape;
+mod subarray;
 use dtype::{DType, TypeAware};
-use item::Item;
 use iter::{ArrayIntoIterator, ArrayIterator, ArrayIteratorMut};
 use nestedlist::NestedList;
 use result::{ArrayResult, Error};
 use shape::Shape;
 use std::{cmp, convert, fmt, fs, mem, ops};
+use subarray::Subarray;
 
 #[derive(Debug)]
 pub struct Array<T>
@@ -34,8 +34,12 @@ where
             Ok(shape) => {
                 let mut data = Vec::with_capacity(shape.volume() as usize);
 
-                fn operate_rec<'a, T, F, R>(a: Item<T>, b: Item<T>, data: &mut Vec<R>, op: &'a F)
-                where
+                fn operate_rec<'a, T, F, R>(
+                    a: Subarray<T>,
+                    b: Subarray<T>,
+                    data: &mut Vec<R>,
+                    op: &'a F,
+                ) where
                     T: TypeAware,
                     R: TypeAware,
                     F: Fn(T, T) -> R,
@@ -74,7 +78,7 @@ where
                     }
                 }
 
-                operate_rec(Item::new(self), Item::new(other), &mut data, &op);
+                operate_rec(Subarray::new(self), Subarray::new(other), &mut data, &op);
 
                 Ok(Array { shape, data })
             }
@@ -82,12 +86,21 @@ where
         }
     }
 
+    pub fn ndims(&self) -> isize {
+        self.shape().ndims()
+    }
+
     pub fn shape(&self) -> &Shape {
         &self.shape
     }
 
-    pub fn rank(&self) -> isize {
-        self.shape().ndims()
+    pub fn size(&self) -> isize {
+        todo!()
+    }
+
+    pub fn len(&self) -> Option<isize> {
+        // self.shape.last()
+        todo!()
     }
 
     pub fn dtype() -> T::Type {
@@ -129,7 +142,7 @@ where
         // TODO: change these to self.iter() and other.iter() once ArrayIter is impl'd
         let self_iter = self.data().iter();
         let other_iter = other.data().iter();
-        self.rank() == other.rank() && self_iter.zip(other_iter).all(|(&a, &b)| a == b)
+        self.ndims() == other.ndims() && self_iter.zip(other_iter).all(|(&a, &b)| a == b)
     }
 }
 
