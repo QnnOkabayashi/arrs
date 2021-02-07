@@ -1,15 +1,20 @@
 use std::{cmp, fmt, result};
 
+// lowest dimensions are first
 #[derive(Debug, Clone)]
-pub struct Shape(Vec<usize>);
+pub struct Shape(Vec<isize>);
 
 impl Shape {
-    pub fn new(dims: Vec<usize>) -> Shape {
-        Shape(dims)
+    pub fn new(dims: Vec<isize>) -> Shape {
+        if dims.len() > 0 {
+            Shape(dims)
+        } else {
+            panic!("shape can't have 0 dims")
+        }
     }
 
     pub fn cast(&self, other: &Shape) -> CastResult {
-        let mut dims = Vec::with_capacity(cmp::max(self.ndims(), other.ndims()));
+        let mut dims = Vec::with_capacity(cmp::max(self.ndims(), other.ndims()) as usize);
 
         let (mut lhs, mut rhs) = (self.iter(), other.iter());
 
@@ -30,23 +35,24 @@ impl Shape {
         Ok(Shape::new(dims))
     }
 
-    pub fn ndims(&self) -> usize {
-        self.0.len()
+    pub fn ndims(&self) -> isize {
+        self.0.len() as isize
     }
 
-    pub fn dim(&self, index: usize) -> Option<usize> {
-        if index < self.ndims() {
-            Some(self.0[index])
+    pub fn dim(&self, index: isize) -> isize {
+        if 0 <= index && index < self.ndims() {
+            self.0[index as usize]
         } else {
-            None
+            // testing purposes only
+            panic!("index: {}, ndims: {}", index, self.ndims())
         }
     }
 
-    pub fn volume(&self) -> usize {
+    pub fn volume(&self) -> isize {
         self.iter().product()
     }
 
-    fn iter(&self) -> impl Iterator<Item = &usize> {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &isize> {
         self.0.iter()
     }
 }
@@ -59,7 +65,11 @@ impl cmp::PartialEq for Shape {
 
 impl fmt::Display for Shape {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self.0)
+        write!(
+            f,
+            "{:?}",
+            self.0.iter().rev().copied().collect::<Vec<isize>>()
+        )
     }
 }
 
@@ -186,14 +196,20 @@ mod tests {
     #[test]
     fn test_volume1() {
         let a = Shape::new(vec![3, 256, 256]);
-        let expected = 3 * 256 * 256 as usize;
+        let expected = 3 * 256 * 256 as isize;
         assert_eq!(expected, a.volume());
     }
 
     #[test]
     fn test_volume2() {
-        let a = Shape::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-        let expected = 1 * 2 * 3 * 4 * 5 * 6 * 7 * 8 * 9 * 10 as usize;
+        let a = Shape::new((1..11).collect::<Vec<isize>>());
+        let expected = (1..11).product::<isize>();
         assert_eq!(expected, a.volume());
+    }
+
+    #[test]
+    fn test_display1() {
+        let a = Shape::new(vec![1, 2, 3, 4, 5]);
+        assert_eq!(a.to_string(), String::from("[5, 4, 3, 2, 1]"));
     }
 }

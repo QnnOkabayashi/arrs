@@ -1,9 +1,9 @@
-use super::{dtype::TypeConscious, Array};
+use super::{dtype::TypeAware, Array};
 use std::iter::Iterator;
 
 pub struct ArrayIterator<'a, T>
 where
-    T: TypeConscious,
+    T: TypeAware,
 {
     base: &'a Array<T>,
     index: usize,
@@ -11,7 +11,7 @@ where
 
 pub struct ArrayIteratorMut<'a, T>
 where
-    T: TypeConscious,
+    T: TypeAware,
 {
     base: &'a mut Array<T>,
     index: usize,
@@ -19,7 +19,7 @@ where
 
 pub struct ArrayIntoIterator<T>
 where
-    T: TypeConscious,
+    T: TypeAware,
 {
     base: Array<T>,
     index: usize,
@@ -27,7 +27,7 @@ where
 
 impl<'a, T> Iterator for ArrayIterator<'a, T>
 where
-    T: TypeConscious,
+    T: TypeAware,
 {
     type Item = &'a T;
 
@@ -38,7 +38,7 @@ where
 
 impl<'a, T> Iterator for ArrayIteratorMut<'a, T>
 where
-    T: TypeConscious,
+    T: TypeAware,
 {
     type Item = &'a mut T;
 
@@ -49,7 +49,7 @@ where
 
 impl<T> Iterator for ArrayIntoIterator<T>
 where
-    T: TypeConscious,
+    T: TypeAware,
 {
     type Item = T;
 

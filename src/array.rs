@@ -1,122 +1,113 @@
-mod cursor;
 mod dtype;
-mod indexitem;
 mod iter;
 mod nestedlist;
 mod result;
 mod shape;
-use cursor::ArrayCursor;
-use dtype::{DType, TypeConscious};
-use indexitem::IndexItem;
+mod subarray;
+use dtype::{DType, TypeAware};
 use iter::{ArrayIntoIterator, ArrayIterator, ArrayIteratorMut};
 use nestedlist::NestedList;
-use result::{ArrayError, ArrayResult};
+use result::{ArrayResult, Error};
 use shape::Shape;
-use std::{convert, fmt, fs, io, mem, rc};
+use std::{cmp, convert, fmt, fs, mem, ops};
+use subarray::Subarray;
 
-type Data<T> = rc::Rc<Vec<T>>;
-
+#[derive(Debug)]
 pub struct Array<T>
 where
-    T: TypeConscious,
+    T: TypeAware,
 {
     shape: Shape,
-    data: Data<T>, // todo!("make data its own struct?")
+    data: Vec<T>,
 }
 
 impl<T> Array<T>
 where
-    T: TypeConscious,
+    T: TypeAware,
 {
-    fn operate<F, R>(&self, rhs: &Self, op: F) -> ArrayResult<R>
+    fn operate<F, R>(&self, other: &Self, op: F) -> ArrayResult<R>
     where
-        F: Fn((&T, &T)) -> R,
-        R: TypeConscious,
+        F: Fn(T, T) -> R,
+        R: TypeAware,
     {
-        match self.shape().cast(rhs.shape()) {
+        match self.shape().cast(other.shape()) {
             Ok(shape) => {
-                let mut data = Vec::with_capacity(shape.volume());
+                let mut data = Vec::with_capacity(shape.volume() as usize);
 
-                // TODO: implement once I know what I'm doing
-
-                // 4 x 1 . 1 x 3 => 4 x 3
-                // X       X X X    X X X
-                // X - >     |      X X X
-                // X         v      X X X
-                // X                X X X
-
-                // this should work but where do the values
-                // even get written to in the array???
-                // hypothesis 1: they just get pushed
-                // since the order (might) be ordered correctly?
-                // also this is a very naive implementation
-                // and could definitely be optimized
-
-                // just need a way to access each dimension by index
-                // would be nice if we could just access a pointer within
-                // the vector and also a starting index
-                // or just have a pointer and a counter on how many times to iterate
-                // but I hate to have to create a struct every time...
-                // create a ArrayDimIterator struct that's super bare bones
-
-                /*
-                fn recursive(a: Array<T>, b: Array<T>, vec: &mut Vec<R>) {
-                    if their ranks are equal {
-                        if their ranks are 0 {
-                            // base case
-                            vec.push(op(a[0], b[0]));
-                        } else if their last dims are equal {
+                fn operate_rec<'a, T, F, R>(
+                    a: Subarray<T>,
+                    b: Subarray<T>,
+                    data: &mut Vec<R>,
+                    op: &'a F,
+                ) where
+                    T: TypeAware,
+                    R: TypeAware,
+                    F: Fn(T, T) -> R,
+                {
+                    if a.ndims() == 0 && b.ndims() == 0 {
+                        // base case
+                        data.push(op(a.read(), b.read()));
+                    } else if a.ndims() == b.ndims() {
+                        if a.len() == b.len() {
                             // linear case
-                            let N = a.shape(a.rank()-1);
-                            for n in ..N {
-                                recursive(a.slice(n), b.slice(n), vec);
+                            for n in 0..a.len() {
+                                operate_rec(a.at(n), b.at(n), data, op);
+                            }
+                        } else if a.len() == 1 {
+                            // stretch where a is 1
+                            for n in 0..b.len() {
+                                operate_rec(a.at(0), b.at(n), data, op);
                             }
                         } else {
-                            // stretch case
-                            // N is longer dim (other is 1)
-                            let N = a.width * b.width
-                            for n in ..N {
-                                recursive(a.slice(0), b.slice(n), vec):
-                                // where a has width 1 in this case
+                            // stretch where b is 1
+                            for n in 0..a.len() {
+                                operate_rec(a.at(n), b.at(0), data, op);
                             }
                         }
+                    } else if a.ndims() < b.ndims() {
+                        // stretch where a is 1 padded
+                        for n in 0..b.len() {
+                            // copies a right now... how bad is this
+                            operate_rec(a, b.at(n), data, op);
+                        }
                     } else {
-                        // stretch case (where one needs a dimension added)
-                        // suppose a has a longer rank
-                        let N = a.last_dim();
-                        for n in ..N {
-                            recursive(a.slice(n), b, vec);
-                            // this might be wonky with ownership of b...
-                            // also I'm not sure about if this will mess 
-                            // with the ordering of pushing to the result vec
+                        // stretch where b is 1 padded
+                        for n in 0..a.len() {
+                            operate_rec(a.at(n), b, data, op);
                         }
                     }
-                // where slice() indexes into the array at that index
                 }
-                */
 
-                Ok(Array {
-                    shape,
-                    data: rc::Rc::new(data),
-                })
+                operate_rec(Subarray::new(self), Subarray::new(other), &mut data, &op);
+
+                Ok(Array { shape, data })
             }
-            Err(e) => Err(ArrayError::Cast(e)),
+            Err(e) => Err(Error::Cast(e)),
         }
+    }
+
+    pub fn ndims(&self) -> isize {
+        self.shape().ndims()
     }
 
     pub fn shape(&self) -> &Shape {
         &self.shape
     }
 
-    pub fn rank(&self) -> usize {
-        self.shape().ndims()
+    pub fn size(&self) -> isize {
+        todo!()
+    }
+
+    pub fn len(&self) -> Option<isize> {
+        // self.shape.last()
+        todo!()
     }
 
     pub fn dtype() -> T::Type {
         T::Type::new()
     }
 
-    pub fn data(&self) -> &Data<T> {
+    pub fn data(&self) -> &Vec<T> {
         &self.data
     }
 
@@ -133,45 +124,37 @@ where
         todo!("create a T iterator")
     }
 
-    // slice
-    // todo!("figure out semantics of slicing")
-}
-
-impl<T> Array<T>
-where
-    T: TypeConscious + Copy,
-{
     pub fn reshape(self, shape: Shape) -> ArrayResult<T> {
         if self.shape.volume() == shape.volume() {
-            Ok(Array {
-                shape,
-                data: rc::Rc::new(self.iter().copied().collect()),
-            })
+            let data = self.iter().copied().collect();
+            Ok(Array { shape, data })
         } else {
-            Err(ArrayError::Reshape(self.shape().clone(), shape))
+            Err(Error::Reshape(self.shape().clone(), shape))
         }
     }
+}
 
-    // fn view(&self, index: usize) -> IndexItem<T> {
-    //     if self.rank() == 1 {
-    //         IndexItem::Val(self.data()[0])
-    //     } else {
-    //         IndexItem::Arr(Array {
-    //             shape: Shape::new(self.shape().iter().take(self.rank() - 1).collect())
-    //         })
-    //     }
-    // }
+impl<T> cmp::PartialEq for Array<T>
+where
+    T: TypeAware + PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        // TODO: change these to self.iter() and other.iter() once ArrayIter is impl'd
+        let self_iter = self.data().iter();
+        let other_iter = other.data().iter();
+        self.ndims() == other.ndims() && self_iter.zip(other_iter).all(|(&a, &b)| a == b)
+    }
 }
 
 macro_rules! impl_array_cmp {
     { $( $name:ident: $e:expr ),* } => {
         impl<T> Array<T>
         where
-            T: TypeConscious + PartialOrd,
+            T: TypeAware + PartialOrd,
         {
             $(
-                pub fn $name(&self, rhs: &Self) -> ArrayResult<bool> {
-                    self.operate(rhs, $e)
+                pub fn $name(&self, other: &Self) -> ArrayResult<bool> {
+                    self.operate(other, $e)
                 }
             )*
         }
@@ -179,16 +162,40 @@ macro_rules! impl_array_cmp {
 }
 
 impl_array_cmp! {
-    eq: |(a, b)| a == b,
-    ne: |(a, b)| a != b,
-    lt: |(a, b)| a < b,
-    le: |(a, b)| a <= b,
-    gt: |(a, b)| a > b,
-    ge: |(a, b)| a >= b
+    v_eq: |a, b| a == b,
+    v_ne: |a, b| a != b,
+    v_lt: |a, b| a < b,
+    v_le: |a, b| a <= b,
+    v_gt: |a, b| a > b,
+    v_ge: |a, b| a >= b
+}
+
+macro_rules! impl_array_op {
+    { $( $name:ident($op_trait:path): $e:expr ),* } => {
+        $(
+            impl<T> Array<T>
+            where
+            T: TypeAware + $op_trait,
+            <T as $op_trait>::Output: TypeAware,
+            {
+                pub fn $name(&self, other: &Self) -> ArrayResult<<T as $op_trait>::Output> {
+                    self.operate(other, $e)
+                }
+            }
+        )*
+    }
+}
+
+impl_array_op! {
+    v_add(ops::Add): |a, b| a + b,
+    v_sub(ops::Sub): |a, b| a - b,
+    v_mul(ops::Mul): |a, b| a * b,
+    v_div(ops::Div): |a, b| a / b,
+    v_rem(ops::Rem): |a, b| a % b
 }
 
 macro_rules! impl_array_astype {
-    { $( $name:ident for $type_struct:ident as $inner_type:ty ),* } => {
+    { $( $name:ident for $inner_type:ty as $type_struct:ident ),* } => {
         $(
             #[derive(Copy, Clone, PartialEq)]
             pub struct $type_struct;
@@ -209,13 +216,13 @@ macro_rules! impl_array_astype {
                 }
             }
 
-            impl TypeConscious for $inner_type {
+            impl TypeAware for $inner_type {
                 type Type = $type_struct;
             }
 
             impl<T> Array<T>
             where
-                T: TypeConscious + Copy + PartialOrd + convert::Into<$inner_type>,
+                T: TypeAware + Copy + PartialOrd + convert::Into<$inner_type>,
             {
                 pub fn $name(&self) -> Array<$inner_type> {
                     let data = self
@@ -225,7 +232,7 @@ macro_rules! impl_array_astype {
 
                     Array {
                         shape: self.shape.clone(),
-                        data: rc::Rc::new(data),
+                        data,
                     }
                 }
             }
@@ -234,96 +241,109 @@ macro_rules! impl_array_astype {
 }
 
 impl_array_astype! {
-    astype_bool for Bool as bool,
-    astype_uint8 for Uint8 as u8,
-    astype_int8 for Int8 as i8,
-    astype_int16 for Int16 as i16,
-    astype_int32 for Int32 as i32,
-    astype_float32 for Float32 as f32,
-    astype_float64 for Float64 as f64
+    astype_bool for bool as Bool,
+    astype_uint8 for u8 as Uint8,
+    astype_int8 for i8 as Int8,
+    astype_int16 for i16 as Int16,
+    astype_int32 for i32 as Int32,
+    astype_float32 for f32 as Float32,
+    astype_float64 for f64 as Float64
 }
 
+mod tests {
+    use super::*;
 
-
-// iterators over each dimension
-// would be nice if I made pseudo-shapes so
-// that they match up nicely (equal size, 1-padded)
-// a struct where you give it an index, and it gives you
-// an iterator for that dim
-
-pub enum ArrayElement<'a, T>
-where
-    T: TypeConscious,
-{
-    Array(ArrayDimIterator<'a, T>),
-    Value(&'a T),
-}
-
-pub struct ArrayDimIterator<'a, T>
-where
-    T: TypeConscious,
-{
-    shape: &'a Shape,
-    depth: usize,
-    index: usize,
-    data: &'a mut ArrayCursor<'a, T>,
-}
-
-impl<'a, T> Iterator for ArrayDimIterator<'a, T>
-where
-    T: TypeConscious,
-{
-    type Item = ArrayElement<'a, T>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index < self.shape.dim(self.depth)? {
-            Some(if self.depth == 0 {
-                let value = ArrayElement::Value(self.data.read());
-                self.data.move_pos(1);
-                self.index += 1;
-                value
-            } else {
-                let array = ArrayElement::Array(
-                    ArrayDimIterator {
-                        shape: self.shape,
-                        depth: self.depth - 1,
-                        index: 0,
-                        data: self.data,
-                    }
-                );
-                array
-            })
-        } else {
-            None
-        }
+    fn make_array<T>(shape: Vec<isize>, data: Vec<T>) -> Array<T>
+    where
+        T: TypeAware,
+    {
+        let shape = Shape::new(shape);
+        assert!(shape.volume() == data.len() as isize);
+        Array { shape, data }
     }
 
-}
+    #[test]
+    fn test_eq1() {
+        let arr1 = make_array(vec![2, 2], vec![0, 1, 2, 3]);
+        let arr2 = make_array(vec![2, 2], vec![0, 1, 2, 3]);
+        assert_eq!(arr1, arr2);
+    }
 
+    #[test]
+    fn test_cast1() {
+        let arr1 = make_array(vec![1], vec![10]);
+        let arr2 = make_array(vec![4], vec![0, 1, 2, 3]);
+        let expected = make_array(vec![4], vec![0, 10, 20, 30]);
 
+        let op = |a, b| a * b;
+        let actual = arr1.operate(&arr2, op).unwrap();
 
+        assert_eq!(expected, actual);
+    }
 
-#[test]
-fn test_compile() {
-    println!("It works!")
+    #[test]
+    fn test_cast2() {
+        let arr1 = make_array(vec![1], vec![10]);
+        let arr2 = make_array(vec![2, 2], vec![0, 1, 2, 3]);
+        let expected = make_array(vec![2, 2], vec![0, 10, 20, 30]);
+
+        let op = |a, b| a * b;
+        let actual = arr1.operate(&arr2, op).unwrap();
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_cast3() {
+        let arr1 = make_array(vec![2], vec![0, 1]);
+        let arr2 = make_array(vec![2, 3], vec![0, 1, 2, 3, 4, 5]);
+        let expected = make_array(vec![2, 3], vec![0, 1, 0, 3, 0, 5]);
+
+        let op = |a, b| a * b;
+        let actual = arr1.operate(&arr2, op).unwrap();
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_cast4() {
+        let arr1 = make_array(vec![2, 2, 2], vec![0, 1, 2, 3, 4, 5, 6, 7]);
+        let arr2 = make_array(vec![1, 2], vec![0, 1]);
+        let expected = make_array(vec![2, 2, 2], vec![0, 0, 2, 3, 0, 0, 6, 7]);
+
+        let op = |a, b| a * b;
+        let actual = arr1.operate(&arr2, op).unwrap();
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_cast5() {
+        let arr1 = make_array(vec![2, 2, 2], vec![0, 1, 2, 3, 4, 5, 6, 7]);
+        let arr2 = make_array(vec![1, 2], vec![0, 1]);
+        let expected = make_array(vec![2, 2, 2], vec![0, 0, 2, 3, 0, 0, 6, 7]);
+
+        let actual = arr1.v_mul(&arr2).unwrap();
+
+        assert_eq!(expected, actual);
+    }
 }
 
 impl<T> convert::From<Vec<T>> for Array<T>
 where
-    T: TypeConscious,
+    T: TypeAware,
 {
     fn from(data: Vec<T>) -> Self {
         let shape = Shape::new(vec![1]);
-        let data = rc::Rc::new(data);
         Self { shape, data }
     }
 }
 
 impl<T> convert::TryFrom<NestedList<T>> for Array<T>
 where
-    T: TypeConscious,
+    T: TypeAware,
 {
-    type Error = ArrayError<T>;
+    type Error = Error<T>;
 
     fn try_from(nlist: NestedList<T>) -> ArrayResult<T> {
         todo!()
@@ -332,9 +352,9 @@ where
 
 impl<T> convert::TryFrom<fs::File> for Array<T>
 where
-    T: TypeConscious,
+    T: TypeAware,
 {
-    type Error = ArrayError<T>;
+    type Error = Error<T>;
 
     fn try_from(f: fs::File) -> ArrayResult<T> {
         todo!()
