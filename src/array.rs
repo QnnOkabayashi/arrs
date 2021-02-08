@@ -4,11 +4,11 @@ mod nestedlist;
 mod result;
 mod shape;
 mod subarray;
-use dtype::{DType, TypeAware};
+pub use dtype::{DType, TypeAware};
 use iter::{ArrayIntoIterator, ArrayIterator, ArrayIteratorMut};
 use nestedlist::NestedList;
 use result::{ArrayResult, Error};
-use shape::Shape;
+pub use shape::Shape;
 use std::{cmp, convert, fmt, fs, mem, ops};
 use subarray::Subarray;
 
@@ -25,6 +25,10 @@ impl<T> Array<T>
 where
     T: TypeAware,
 {
+    pub fn new(shape: Shape, data: Vec<T>) -> Self {
+        Self { shape, data }
+    }
+
     fn operate<F, R>(&self, other: &Self, op: F) -> ArrayResult<R>
     where
         F: Fn(T, T) -> R,
@@ -195,29 +199,33 @@ impl_array_op! {
 }
 
 macro_rules! impl_array_astype {
-    { $( $name:ident for $inner_type:ty as $type_struct:ident ),* } => {
+    { $( $name:ident for $inner_type:ty as $dtype:ident where id: $id:expr),* } => {
         $(
             #[derive(Copy, Clone, PartialEq)]
-            pub struct $type_struct;
+            pub struct $dtype;
 
-            impl DType for $type_struct {
+            impl DType for $dtype {
                 fn new() -> Self {
-                    $type_struct
+                    $dtype
                 }
 
-                fn bytes(&self) -> usize {
+                fn bytes() -> usize {
                     mem::size_of::<$inner_type>()
+                }
+
+                fn id() -> u8 {
+                    $id
                 }
             }
 
-            impl fmt::Display for $type_struct {
+            impl fmt::Display for $dtype {
                 fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                    write!(f, stringify!($type_struct))
+                    write!(f, stringify!($dtype))
                 }
             }
 
             impl TypeAware for $inner_type {
-                type Type = $type_struct;
+                type Type = $dtype;
             }
 
             impl<T> Array<T>
@@ -241,13 +249,13 @@ macro_rules! impl_array_astype {
 }
 
 impl_array_astype! {
-    astype_bool for bool as Bool,
-    astype_uint8 for u8 as Uint8,
-    astype_int8 for i8 as Int8,
-    astype_int16 for i16 as Int16,
-    astype_int32 for i32 as Int32,
-    astype_float32 for f32 as Float32,
-    astype_float64 for f64 as Float64
+    astype_bool for bool as Bool where id: 0x07,
+    astype_uint8 for u8 as Uint8 where id: 0x08,
+    astype_int8 for i8 as Int8 where id: 0x09,
+    astype_int16 for i16 as Int16 where id: 0x0B,
+    astype_int32 for i32 as Int32 where id: 0x0C,
+    astype_float32 for f32 as Float32 where id: 0x0D,
+    astype_float64 for f64 as Float64 where id: 0x0E
 }
 
 mod tests {
