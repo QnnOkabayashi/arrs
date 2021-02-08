@@ -1,16 +1,16 @@
 mod visitor;
-use super::error::{Error, Result};
-use super::{Array, DType, Endianess, Shape, TypeAware};
+use super::error::{Error, Result as SdResult};
+use super::{Array, BigEndian, TypeAware};
 use serde::{de, Deserialize};
 use std::result;
-use visitor::{DataVisitor, MagicNumberVisitor, ShapeVisitor};
+use visitor::IdxVisitor;
 
-pub fn from_bytes<'a, A>(input: Vec<u8>) -> Result<A>
+pub fn from_bytes<T>(input: Vec<u8>) -> SdResult<Array<T>>
 where
-    A: Deserialize<'a>,
+    T: TypeAware + BigEndian,
 {
     let mut deserializer = IdxDeserializer::from_bytes(&input);
-    let arr = A::deserialize(&mut deserializer);
+    let arr = Array::<T>::deserialize(&mut deserializer);
     if deserializer.is_done() {
         arr
     } else {
@@ -19,6 +19,7 @@ where
 }
 
 pub struct IdxDeserializer<'de> {
+    // TODO: change this to take an IntoIter later?
     input: &'de [u8],
 }
 
@@ -34,54 +35,20 @@ impl<'de> IdxDeserializer<'de> {
 
 impl<'de, T> de::Deserialize<'de> for Array<T>
 where
-    T: TypeAware + Endianess,
+    T: TypeAware + BigEndian,
 {
     fn deserialize<D>(deserializer: D) -> result::Result<Self, <D as de::Deserializer<'de>>::Error>
     where
         D: de::Deserializer<'de>,
     {
-        // do everything through deserialize_struct?
-        let ndims = deserializer
-            .deserialize_bytes(MagicNumberVisitor::new(<T as TypeAware>::Type::id()))?;
-        let shape = deserializer.deserialize_bytes(ShapeVisitor::new(ndims))?;
-        let data = deserializer.deserialize_bytes(DataVisitor::new(shape.volume()))?;
-
-        Ok(Array::new(shape, data))
-        // let magic = {
-        //     let read_magic: ResultV<u8> = (0..mem::size_of::<i32>())
-        //         .map(|_| deserializer.deserialize_u8(U8Visitor))
-        //         .collect();
-        //     read_magic?
-        // };
-        //     let array_type = <T as TypeAware>::Type::id();
-        //     let magic_type = magic[2];
-        //     if array_type != magic_type {
-        //         return Err(Error::MismatchTypes {
-        //             expected: array_type,
-        //             received: magic_type,
-        //         });
-        //     }
-        //     let shape = Shape::new({
-        //         let ndims = magic[3];
-        //         let read_dims: ResultV<isize> = (0..ndims)
-        //             .map(|_| self.read_next::<i32>().and_then(|x| Ok(x as isize)))
-        //             .collect();
-        //         read_dims?
-        //     });
-        //     let data = {
-        //         let read_data: ResultV<T> = (0..shape.volume())
-        //             .map(|_| self.read_next::<T>())
-        //             .collect();
-        //         read_data?
-        //     };
-        //     Ok(Array::new(shape, data))
+        deserializer.deserialize_struct("Array", &["shape", "data"], IdxVisitor::<T>::new())
     }
 }
 
-macro_rules! impl_deserialize {
+macro_rules! impl_not_implemented {
     { $( $deserialize_b:ident ),* } => {
         $(
-            fn $deserialize_b<V>(self, _visitor: V) -> Result<V::Value>
+            fn $deserialize_b<V>(self, _visitor: V) -> SdResult<V::Value>
             where
                 V: de::Visitor<'de>
             {
@@ -96,14 +63,20 @@ macro_rules! impl_deserialize {
 impl<'de> de::Deserializer<'de> for &mut IdxDeserializer<'de> {
     type Error = Error;
 
-    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_struct<V>(
+        self,
+        _name: &'static str,
+        _fields: &'static [&'static str],
+        visitor: V,
+    ) -> SdResult<V::Value>
     where
+        // V _must_ be an ArrayVisitor
         V: de::Visitor<'de>,
     {
         visitor.visit_bytes(self.input)
     }
 
-    impl_deserialize! {
+    impl_not_implemented! {
         deserialize_bool,
         deserialize_i8,
         deserialize_u8,
@@ -119,6 +92,7 @@ impl<'de> de::Deserializer<'de> for &mut IdxDeserializer<'de> {
         deserialize_any,
         deserialize_str,
         deserialize_string,
+        deserialize_bytes,
         deserialize_byte_buf,
         deserialize_option,
         deserialize_unit,
@@ -128,7 +102,7 @@ impl<'de> de::Deserializer<'de> for &mut IdxDeserializer<'de> {
         deserialize_ignored_any
     }
 
-    fn deserialize_unit_struct<V>(self, _name: &'static str, _visitor: V) -> Result<V::Value>
+    fn deserialize_unit_struct<V>(self, _name: &'static str, _visitor: V) -> SdResult<V::Value>
     where
         V: de::Visitor<'de>,
     {
@@ -137,7 +111,7 @@ impl<'de> de::Deserializer<'de> for &mut IdxDeserializer<'de> {
         })
     }
 
-    fn deserialize_newtype_struct<V>(self, _name: &'static str, _visitor: V) -> Result<V::Value>
+    fn deserialize_newtype_struct<V>(self, _name: &'static str, _visitor: V) -> SdResult<V::Value>
     where
         V: de::Visitor<'de>,
     {
@@ -146,7 +120,7 @@ impl<'de> de::Deserializer<'de> for &mut IdxDeserializer<'de> {
         })
     }
 
-    fn deserialize_tuple<V>(self, _len: usize, _visitor: V) -> Result<V::Value>
+    fn deserialize_tuple<V>(self, _len: usize, _visitor: V) -> SdResult<V::Value>
     where
         V: de::Visitor<'de>,
     {
@@ -160,7 +134,7 @@ impl<'de> de::Deserializer<'de> for &mut IdxDeserializer<'de> {
         _name: &'static str,
         _len: usize,
         _visitor: V,
-    ) -> Result<V::Value>
+    ) -> SdResult<V::Value>
     where
         V: de::Visitor<'de>,
     {
@@ -169,26 +143,12 @@ impl<'de> de::Deserializer<'de> for &mut IdxDeserializer<'de> {
         })
     }
 
-    fn deserialize_struct<V>(
-        self,
-        _name: &'static str,
-        _fields: &'static [&'static str],
-        _visitor: V,
-    ) -> Result<V::Value>
-    where
-        V: de::Visitor<'de>,
-    {
-        Err(Error::NotImplemented {
-            method: "deserialize_struct",
-        })
-    }
-
     fn deserialize_enum<V>(
         self,
         _name: &'static str,
         _variants: &'static [&'static str],
         _visitor: V,
-    ) -> Result<V::Value>
+    ) -> SdResult<V::Value>
     where
         V: de::Visitor<'de>,
     {

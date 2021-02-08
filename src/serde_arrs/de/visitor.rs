@@ -1,138 +1,92 @@
-use crate::array::{DType, TypeAware};
+use crate::array::{Array, DType, Shape, TypeAware};
 
-use super::{de, Endianess, Shape};
-use std::{fmt, marker, result};
+use super::{de, BigEndian};
+use std::{fmt, marker::PhantomData, result::Result};
 
-pub(super) struct MagicNumberVisitor {
-    dtype: u8,
-}
-
-impl MagicNumberVisitor {
-    pub fn new(dtype: u8) -> Self {
-        Self { dtype }
-    }
-}
-
-impl<'de> de::Visitor<'de> for MagicNumberVisitor {
-    type Value = usize;
-
-    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "a byte array with at least 4 bytes, where the third byte is {:#X}",
-            self.dtype
-        )
-    }
-
-    fn visit_bytes<E>(self, b: &[u8]) -> result::Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        // check that a magic number can be read
-        if b.len() < 4 {
-            return Err(E::invalid_length(b.len(), &self));
-        }
-        // check for matching dtype
-        if b[2] != self.dtype {
-            return Err(E::invalid_value(de::Unexpected::Bytes(&b[2..]), &self));
-        }
-        Ok(b[3] as usize)
-    }
-}
-
-pub(super) struct ShapeVisitor {
-    ndims: usize,
-}
-
-impl ShapeVisitor {
-    pub fn new(ndims: usize) -> Self {
-        Self { ndims }
-    }
-}
-
-impl<'de> de::Visitor<'de> for ShapeVisitor {
-    type Value = Shape;
-
-    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "a byte array containing at least {} 32-bit integers",
-            self.ndims
-        )
-    }
-
-    fn visit_bytes<E>(self, b: &[u8]) -> result::Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        if b.len() < 4 * self.ndims {
-            return Err(E::invalid_length(b.len(), &self));
-        }
-
-        Ok(Shape::new(
-            (0..self.ndims)
-                .map(|chunk| {
-                    let offset = chunk * 4;
-                    let dim = <i32 as Endianess>::from_be_bytes(&b[offset..offset + 4]);
-
-                    dim as isize
-                })
-                .collect(),
-        ))
-    }
-}
-
-pub(super) struct DataVisitor<T>
+pub struct IdxVisitor<T>
 where
-    T: TypeAware + Endianess,
+    T: TypeAware + BigEndian,
 {
-    len: usize,
-    pd: marker::PhantomData<T>,
+    ndims: Option<usize>,
+    volume: Option<usize>,
+    pd: PhantomData<T>,
 }
 
-impl<T> DataVisitor<T>
+impl<T> IdxVisitor<T>
 where
-    T: TypeAware + Endianess,
+    T: TypeAware + BigEndian,
 {
-    pub fn new(len: isize) -> Self {
+    pub fn new() -> Self {
         Self {
-            len: len as usize,
-            pd: marker::PhantomData,
+            ndims: None,
+            volume: None,
+            pd: PhantomData,
         }
     }
 }
 
-impl<'de, T> de::Visitor<'de> for DataVisitor<T>
+impl<'de, T> de::Visitor<'de> for IdxVisitor<T>
 where
-    T: TypeAware + Endianess,
+    T: TypeAware + BigEndian,
 {
-    type Value = Vec<T>;
+    type Value = Array<T>;
 
     fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "a byte array containing at least {} bytes for {} {}'s",
-            self.len * <T as TypeAware>::Type::bytes(),
-            self.len,
-            <T as TypeAware>::Type::new()
-        )
+        let mut msg = format!("a magic number with dtype: {}", T::Type::id());
+        if let Some(ndims) = self.ndims {
+            msg += &format!(", {} dims", ndims);
+        }
+        if let Some(volume) = self.volume {
+            msg += &format!(", {} elements", volume);
+        }
+
+        f.write_str(&msg)
     }
 
-    fn visit_bytes<E>(self, b: &[u8]) -> result::Result<Self::Value, E>
+    fn visit_bytes<E>(mut self, v: &[u8]) -> Result<Self::Value, E>
     where
         E: de::Error,
     {
-        if b.len() < self.len {
-            return Err(E::invalid_length(b.len(), &self));
+        let mut strm = v.iter();
+
+        let mut magic = [0u8; 4];
+        for byte in magic.iter_mut() {
+            *byte = *strm
+                .next()
+                .ok_or(E::invalid_value(de::Unexpected::Other("eof"), &self))?
         }
 
-        Ok((0..self.len)
-            .map(|chunk| {
-                let size = <T as TypeAware>::Type::bytes();
-                let offset = chunk * size;
+        let magic_type = magic[2];
+        if magic_type != <T as TypeAware>::Type::id() {
+            return Err(E::invalid_value(
+                de::Unexpected::Unsigned(magic_type as u64),
+                &self,
+            ));
+        }
 
-                <T as Endianess>::from_be_bytes(&b[offset..offset + size])
-            })
-            .collect())
+        let ndims = magic[3] as usize;
+        self.ndims = Some(ndims);
+        let mut dims = Vec::with_capacity(ndims);
+        for _ in 0..ndims {
+            dims.push(
+                <i32 as BigEndian>::from_be_bytes(&mut strm)
+                    .map_err(|_| E::invalid_value(de::Unexpected::Other("eof"), &self))?
+                    as isize,
+            );
+        }
+
+        let shape = Shape::new(dims);
+
+        let volume = shape.volume() as usize;
+        self.volume = Some(volume);
+        let mut data = Vec::with_capacity(volume);
+        for _ in 0..volume {
+            data.push(
+                <T as BigEndian>::from_be_bytes(&mut strm)
+                    .map_err(|_| E::invalid_value(de::Unexpected::Other("eof"), &self))?,
+            );
+        }
+
+        Ok(Array::new(shape, data))
     }
 }
