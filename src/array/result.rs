@@ -44,14 +44,6 @@ pub type ArrayResult<T> = result::Result<Array<T>, Error<T>>;
 
 mod tests {
     use super::*;
-    #[test]
-    fn test_broadcast_result() {
-        todo!("rewrite these tests");
-        // let (a, b) = (vec![1, 2, 3], vec![2, 2, 3]);
-        // let err = ArrayError::<i32>::Broadcast(a, b);
-        // let res = ArrayResult::Err(err);
-        // assert_eq!(res.unwrap_err().to_string(), format!("ArrayError: operands could not be broadcast together with shapes [1, 2, 3] [2, 2, 3]"))
-    }
 
     #[test]
     fn test_tryfrom_nlist_error() {
