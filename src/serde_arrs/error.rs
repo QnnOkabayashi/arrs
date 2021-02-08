@@ -2,7 +2,6 @@ use serde::{de, ser};
 use std::{fmt, io, result};
 
 pub type Result<T> = result::Result<T, Error>;
-pub type ResultV<T> = result::Result<Vec<T>, Error>;
 
 #[derive(Debug)]
 pub enum Error {
