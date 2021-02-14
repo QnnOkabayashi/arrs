@@ -5,21 +5,8 @@ use serde::{de, Deserialize};
 use std::result;
 use visitor::IdxVisitor;
 
-pub fn from_bytes<T>(input: Vec<u8>) -> SdResult<Array<T>>
-where
-    T: TypeAware + BigEndian,
-{
-    let mut deserializer = IdxDeserializer::from_bytes(&input);
-    let arr = Array::<T>::deserialize(&mut deserializer);
-    if deserializer.is_done() {
-        arr
-    } else {
-        Err(Error::TrailingBytes)
-    }
-}
 
 pub struct IdxDeserializer<'de> {
-    // TODO: change this to take an IntoIter later?
     input: &'de [u8],
 }
 
@@ -70,7 +57,6 @@ impl<'de> de::Deserializer<'de> for &mut IdxDeserializer<'de> {
         visitor: V,
     ) -> SdResult<V::Value>
     where
-        // V _must_ be an ArrayVisitor
         V: de::Visitor<'de>,
     {
         visitor.visit_bytes(self.input)

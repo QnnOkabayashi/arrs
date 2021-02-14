@@ -4,6 +4,8 @@ mod ser;
 use super::array::{Array, TypeAware};
 use error::{Error, Result as SdResult};
 use ser::Serializer;
+use de::IdxDeserializer;
+use serde::Deserialize;
 use std::convert::TryInto;
 use std::mem;
 use std::slice::Iter;
@@ -56,3 +58,17 @@ impl_endianess! {
 
 #[test]
 fn compile() {}
+
+pub fn from_bytes<T>(input: Vec<u8>) -> SdResult<Array<T>>
+where
+    T: TypeAware + BigEndian,
+{
+    let mut deserializer = IdxDeserializer::from_bytes(&input);
+    let arr = <Array::<T> as Deserialize>::deserialize(&mut deserializer);
+    arr
+    // if deserializer.is_done() {
+    //     arr
+    // } else {
+    //     Err(Error::TrailingBytes)
+    // }
+}
