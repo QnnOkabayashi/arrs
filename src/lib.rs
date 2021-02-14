@@ -1,3 +1,3 @@
-mod array;
-mod serde_arrs;
+pub mod array;
+pub mod serde_arrs;
 // mod indexing;
