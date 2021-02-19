@@ -1,7 +1,8 @@
 use std::{cmp, fmt, result};
+use serde::{Serialize, Deserialize};
 
 // lowest dimensions are first
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Shape(Vec<isize>);
 
 impl Shape {
@@ -51,9 +52,10 @@ impl Shape {
     }
 }
 
-impl cmp::PartialEq for Shape {
-    fn eq(&self, rhs: &Self) -> bool {
-        self.ndims() == rhs.ndims() && self.iter().zip(rhs.iter()).all(|(a, b)| a == b)
+impl PartialEq for Shape {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+        // self.ndims() == rhs.ndims() && self.iter().zip(rhs.iter()).all(|(a, b)| a == b)
     }
 }
 
