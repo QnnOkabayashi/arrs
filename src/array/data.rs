@@ -1,8 +1,7 @@
 use crate::array::TypeAware;
-use core::cmp::PartialEq;
 use core::slice::Iter;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Data<T>(Vec<T>)
 where
     T: TypeAware;
@@ -25,15 +24,5 @@ where
 
     pub fn len(&self) -> usize {
         self.0.len()
-    }
-}
-
-impl<T> PartialEq for Data<T>
-where
-    T: TypeAware + PartialEq,
-{
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-        // self.0.len() == other.0.len() && self.0.iter().zip(other.0.iter()).all(|(&a, &b)| a == b)
     }
 }

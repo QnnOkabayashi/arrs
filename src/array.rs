@@ -1,19 +1,19 @@
 mod data;
-mod typeaware;
 mod error;
 mod shape;
 mod subarray;
+mod typeaware;
 use core::convert::Into;
 use core::mem::size_of;
 use core::ops;
 use core::slice::Iter;
 pub use data::Data;
-pub use typeaware::TypeAware;
 pub use error::{ArrResult, Error};
 pub use shape::Shape;
 use subarray::Subarray;
+pub use typeaware::TypeAware;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Array<T>
 where
     T: TypeAware,
@@ -128,16 +128,6 @@ where
     }
 }
 
-impl<T> PartialEq for Array<T>
-where
-    T: TypeAware + PartialEq,
-{
-    fn eq(&self, other: &Self) -> bool {
-        // TODO: change these to self.iter() and other.iter() once ArrayIter is impl'd
-        self.shape == other.shape && self.data == other.data
-    }
-}
-
 macro_rules! impl_array_cmp {
     { $( $name:ident: $e:expr ),* } => {
         impl<T> Array<T>
@@ -151,15 +141,6 @@ macro_rules! impl_array_cmp {
             )*
         }
     }
-}
-
-impl_array_cmp! {
-    v_eq: |a, b| a == b,
-    v_ne: |a, b| a != b,
-    v_lt: |a, b| a < b,
-    v_le: |a, b| a <= b,
-    v_gt: |a, b| a > b,
-    v_ge: |a, b| a >= b
 }
 
 macro_rules! impl_array_op {
@@ -176,14 +157,6 @@ macro_rules! impl_array_op {
             }
         )*
     }
-}
-
-impl_array_op! {
-    v_add(ops::Add): |a, b| a + b,
-    v_sub(ops::Sub): |a, b| a - b,
-    v_mul(ops::Mul): |a, b| a * b,
-    v_div(ops::Div): |a, b| a / b,
-    v_rem(ops::Rem): |a, b| a % b
 }
 
 macro_rules! impl_array_astype {
@@ -215,6 +188,23 @@ macro_rules! impl_array_astype {
             }
         )*
     }
+}
+
+impl_array_cmp! {
+    v_eq: |a, b| a == b,
+    v_ne: |a, b| a != b,
+    v_lt: |a, b| a < b,
+    v_le: |a, b| a <= b,
+    v_gt: |a, b| a > b,
+    v_ge: |a, b| a >= b
+}
+
+impl_array_op! {
+    v_add(ops::Add): |a, b| a + b,
+    v_sub(ops::Sub): |a, b| a - b,
+    v_mul(ops::Mul): |a, b| a * b,
+    v_div(ops::Div): |a, b| a / b,
+    v_rem(ops::Rem): |a, b| a % b
 }
 
 impl_array_astype! {

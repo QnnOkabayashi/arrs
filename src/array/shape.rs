@@ -1,11 +1,11 @@
 use crate::array::{ArrResult, Error};
-use std::{
+use core::{
     cmp,
     fmt::{self, Display},
 };
 
 // lowest dimensions are first
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Shape(Vec<isize>);
 
 impl Shape {
@@ -57,13 +57,6 @@ impl Shape {
 
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = &isize> {
         self.0.iter()
-    }
-}
-
-impl PartialEq for Shape {
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-        // self.ndims() == rhs.ndims() && self.iter().zip(rhs.iter()).all(|(a, b)| a == b)
     }
 }
 
