@@ -1,8 +1,8 @@
-use super::TypeAware;
-use std::cmp::PartialEq;
-use serde::{Serialize, Deserialize};
+use crate::array::TypeAware;
+use core::cmp::PartialEq;
+use core::slice::Iter;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Data<T>(Vec<T>)
 where
     T: TypeAware;
@@ -17,6 +17,14 @@ where
 
     pub fn as_ptr(&self) -> *const T {
         self.0.as_ptr()
+    }
+
+    pub fn iter(&self) -> Iter<T> {
+        self.0.iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
     }
 }
 
