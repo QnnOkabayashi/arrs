@@ -38,7 +38,12 @@ where
     }
 
     pub fn at(&'a self, index: isize) -> Subarray<'a, T> {
-        assert!(0 <= index && index < self.len(), "index is {}, but len is {}", index, self.len());
+        assert!(
+            0 <= index && index < self.len(),
+            "index is {}, but len is {}",
+            index,
+            self.len()
+        );
         if self.ndims() > 0 {
             let shape = self.shape;
             let ndims = self.ndims() - 1;
