@@ -5,12 +5,10 @@ use std::{cmp, fmt, result};
 pub struct Shape(Vec<isize>);
 
 impl Shape {
-    pub fn new(dims: Vec<isize>) -> Shape {
-        if dims.len() > 0 {
-            Shape(dims)
-        } else {
-            panic!("shape can't have 0 dims")
-        }
+    pub fn new(dims: Vec<isize>) -> Self {
+        assert!(dims.len() > 0, "shapes can't have 0 dims");
+        // probably should return a `Result` type because it's not impossible
+        Shape(dims)
     }
 
     pub fn cast(&self, other: &Shape) -> CastResult {
@@ -40,12 +38,8 @@ impl Shape {
     }
 
     pub fn dim(&self, index: isize) -> isize {
-        if 0 <= index && index < self.ndims() {
-            self.0[index as usize]
-        } else {
-            // testing purposes only
-            panic!("index: {}, ndims: {}", index, self.ndims())
-        }
+        assert!(0 <= index && index < self.ndims(), "index: {}, ndims: {}", index, self.ndims());
+        self.0[index as usize]
     }
 
     pub fn volume(&self) -> isize {
