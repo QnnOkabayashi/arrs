@@ -1,5 +1,5 @@
 mod data;
-mod dtype;
+mod typeaware;
 mod error;
 mod shape;
 mod subarray;
@@ -8,7 +8,7 @@ use core::mem::size_of;
 use core::ops;
 use core::slice::Iter;
 pub use data::Data;
-pub use dtype::TypeAware;
+pub use typeaware::TypeAware;
 pub use error::{ArrResult, Error};
 pub use shape::Shape;
 use subarray::Subarray;
