@@ -1,74 +1,49 @@
 mod de;
 mod error;
-mod ser;
-use super::array::{Array, TypeAware};
-use error::{Error, Result as SdResult};
-use ser::Serializer;
+use crate::array::{Array, TypeAware};
 use de::IdxDeserializer;
-use serde::Deserialize;
-use std::convert::TryInto;
-use std::mem;
-use std::slice::Iter;
+use error::{Error, Result as SdResult};
+use serde::de::Deserialize;
+use std::io::Read;
 
-pub trait BigEndian: Sized {
-    fn from_be_bytes(strm: &mut Iter<u8>) -> SdResult<Self>;
+pub trait IdxType<'de>: TypeAware + Deserialize<'de> {
+    fn read_be_bytes<R: Read>(reader: &mut R) -> SdResult<Self>;
 
-    // fn to_be_bytes(&self) -> [u8];
+    // probably takes a Writer
+    // fn write_be_bytes<W: Write>(&self, writer: &mut W) -> SdResult<()>;
 }
 
-macro_rules! impl_endianess {
-    { one_byte: [ $( $one_type:ty ),* ], n_bytes: [ $( $n_type:ty ),* ] } => {
-        // one_byte
+macro_rules! impl_idxtype {
+    { $( $type:ty: $size:expr ),* } => {
         $(
-            impl BigEndian for $one_type {
-                fn from_be_bytes(strm: &mut Iter<u8>) -> SdResult<Self> {
-                    if let Some(byte) = strm.next() {
-                        Ok(*byte as Self)
-                    } else {
+            impl<'de> IdxType<'de> for $type {
+                fn read_be_bytes<R: Read>(reader: &mut R) -> SdResult<Self> {
+                    let mut buf = [0; $size];
+                    if reader.read(&mut buf)? < $size {
                         Err(Error::UnexpectedEOF)
+                    } else {
+                        Ok(Self::from_be_bytes(buf))
                     }
-                }
-            }
-        )*
-        // n_bytes
-        $(
-            impl BigEndian for $n_type {
-                fn from_be_bytes(bytes: &mut Iter<u8>) -> SdResult<Self> {
-                    let nbytes = mem::size_of::<$n_type>();
-                    let mut buf = Vec::with_capacity(nbytes);
-                    for _ in 0..nbytes {
-                        buf.push(*bytes.next().ok_or(Error::UnexpectedEOF)?)
-                    }
-
-                    Ok(Self::from_be_bytes(buf.try_into().unwrap()))
                 }
             }
         )*
     }
 }
 
-impl_endianess! {
-    one_byte: [
-        u8, i8
-    ],
-    n_bytes: [
-        i16, i32, f32, f64
-    ]
+impl_idxtype! {
+    u8: 1,
+    i8: 1,
+    i16: 2,
+    i32: 4,
+    f32: 4,
+    f64: 8
 }
 
-#[test]
-fn compile() {}
-
-pub fn from_bytes<T>(input: Vec<u8>) -> SdResult<Array<T>>
+pub fn from_idx<'de, T: 'de>(filename: &str) -> SdResult<Array<T>>
 where
-    T: TypeAware + BigEndian,
+    T: IdxType<'de>,
 {
-    let mut deserializer = IdxDeserializer::from_bytes(&input);
-    let arr = <Array::<T> as Deserialize>::deserialize(&mut deserializer);
-    arr
-    // if deserializer.is_done() {
-    //     arr
-    // } else {
-    //     Err(Error::TrailingBytes)
-    // }
+    let mut deserializer = IdxDeserializer::<T>::from_file(filename)?;
+    deserializer.parse()
+    // <Array<T> as Deserialize>::deserialize(&mut deserializer)
 }

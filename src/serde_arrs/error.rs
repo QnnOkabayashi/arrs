@@ -1,5 +1,5 @@
 use serde::{de, ser};
-use std::{fmt, io, result};
+use std::{convert, fmt, io, result};
 
 pub type Result<T> = result::Result<T, Error>;
 
@@ -9,6 +9,7 @@ pub enum Error {
     MismatchTypes { expected: u8, received: u8 },
     UnexpectedEOF,
     TrailingBytes,
+    OverreadingFields,
     NotImplemented { method: &'static str },
     Io(io::Error),
 }
@@ -46,10 +47,17 @@ impl fmt::Display for Error {
                 }
                 Self::UnexpectedEOF => "File ended unexpectedly".to_owned(),
                 Self::TrailingBytes => "File has trailing bytes".to_owned(),
+                Self::OverreadingFields => "No more readable fields".to_owned(),
                 Self::NotImplemented { method } => method.to_string(),
                 Self::Io(err) => format!("{}", err),
             }
         )
+    }
+}
+
+impl convert::From<io::Error> for Error {
+    fn from(err: io::Error) -> Self {
+        Self::Io(err)
     }
 }
 
