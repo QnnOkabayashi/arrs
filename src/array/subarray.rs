@@ -15,11 +15,11 @@ where
     T: TypeAware,
 {
     pub fn new(array: &'a Array<T>) -> Self {
-        Self {
-            shape: array.shape(),
-            ndims: array.ndims(),
-            data: array.data().as_ptr(),
-        }
+        let shape = array.shape();
+        let ndims = array.ndims();
+        let data = array.data_ptr();
+
+        Self { shape, ndims, data }
     }
 
     pub fn ndims(&self) -> isize {
@@ -38,22 +38,27 @@ where
     }
 
     pub fn at(&'a self, index: isize) -> Subarray<'a, T> {
-        if 0 <= index && index < self.len() {
-            if self.ndims() > 0 {
-                Self {
-                    shape: self.shape,
-                    ndims: self.ndims() - 1,
-                    data: unsafe { self.data.offset(index * self.stride()) },
-                }
-            } else {
-                *self
-            }
+        assert!(
+            0 <= index && index < self.len(),
+            "index is {}, but len is {}",
+            index,
+            self.len()
+        );
+        if self.ndims() > 0 {
+            let shape = self.shape;
+            let ndims = self.ndims() - 1;
+
+            // Safe because we guarenteed above that index won't be too large
+            let data = unsafe { self.data.offset(index * self.stride()) };
+
+            Self { shape, ndims, data }
         } else {
-            panic!("index is {}, but len is {}", index, self.len())
+            *self
         }
     }
 
     pub fn read(&self) -> T {
+        // Safe because self.data is never modified, and is safe at construction
         unsafe { *self.data }
     }
 }

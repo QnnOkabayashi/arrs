@@ -1,20 +1,49 @@
 mod de;
 mod error;
-mod ser;
-use super::array::{Array, DType, Shape, TypeAware};
-use de::BinDeserializer;
-use error::{Error, Result, ResultV};
-use ser::Serializer;
+use crate::array::{Array, TypeAware};
+use de::IdxDeserializer;
+use error::{Error, Result as SdResult};
+use serde::de::Deserialize;
+use std::io::Read;
 
-trait Endianess {
-    fn from_be_bytes(bytes: &[u8]) -> Self;
+pub trait IdxType<'de>: TypeAware + Deserialize<'de> {
+    fn read_be_bytes<R: Read>(reader: &mut R) -> SdResult<Self>;
 
-    fn from_le_bytes(bytes: &[u8]) -> Self;
-
-    fn to_be_bytes(&self) -> [u8];
-
-    fn to_le_bytes(self) -> [u8];
+    // probably takes a Writer
+    // fn write_be_bytes<W: Write>(&self, writer: &mut W) -> SdResult<()>;
 }
 
-#[test]
-fn compile() {}
+macro_rules! impl_idxtype {
+    { $( $type:ty: $size:expr ),* } => {
+        $(
+            impl<'de> IdxType<'de> for $type {
+                fn read_be_bytes<R: Read>(reader: &mut R) -> SdResult<Self> {
+                    let mut buf = [0; $size];
+                    if reader.read(&mut buf)? < $size {
+                        Err(Error::UnexpectedEOF)
+                    } else {
+                        Ok(Self::from_be_bytes(buf))
+                    }
+                }
+            }
+        )*
+    }
+}
+
+impl_idxtype! {
+    u8: 1,
+    i8: 1,
+    i16: 2,
+    i32: 4,
+    f32: 4,
+    f64: 8
+}
+
+pub fn from_idx<'de, T: 'de>(filename: &str) -> SdResult<Array<T>>
+where
+    T: IdxType<'de>,
+{
+    let mut deserializer = IdxDeserializer::<T>::from_file(filename)?;
+    deserializer.parse()
+    // <Array<T> as Deserialize>::deserialize(&mut deserializer)
+}
