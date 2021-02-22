@@ -6,12 +6,12 @@ If CSV parsing is ever used, use fast-float crate for parsing
 https://github.com/aldanor/fast-float-rust
 
 */
-use crate::array::{Data, Shape};
+use crate::array::Shape;
 use crate::serde_arrs::error::{Error, Result as SdResult};
 use crate::serde_arrs::{Array, IdxType, TypeAware};
 use de::{DeserializeSeed, MapAccess, Visitor};
 use serde::{de, Deserializer};
-use std::{fs::File, io::Read, marker::PhantomData};
+use std::{fs::File, io::Read, marker::PhantomData, sync::Arc};
 
 pub struct IdxDeserializer<'de, T>
 where
@@ -65,20 +65,20 @@ where
 
         let mut dims = Vec::with_capacity(ndims);
         for _ in 0..ndims {
-            dims.push(self.read::<i32>()? as isize);
+            dims.push(self.read::<i32>()? as usize);
         }
 
         let shape = Shape::new(dims);
-        let data_len = shape.volume() as usize;
+        let volume = shape.volume();
 
-        let mut raw_data = Vec::with_capacity(data_len);
-        for _ in 0..data_len {
+        let mut raw_data = Vec::with_capacity(volume);
+        for _ in 0..volume {
             raw_data.push(self.read::<T>()?);
         }
 
-        let data = Data::new(raw_data);
+        let data = Arc::new(raw_data);
 
-        // would've exited earlier and shape and data weren't in sync
+        // would've exited earlier if shape and data weren't in sync
         Ok(Array::new(shape, data).unwrap())
     }
 }
