@@ -20,7 +20,6 @@ mod tests {
     }
 }
 
-/// Used for indexing into an NDArray
 #[derive(Debug, PartialEq, Clone)]
 pub enum Indexer {
     Scalar(usize),
