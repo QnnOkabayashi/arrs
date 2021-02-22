@@ -1,15 +1,19 @@
+// TODO: combine cast tests from array_tests and shape_tests
+use crate::array::{Array, Shape, TypeAware};
+use std::sync::Arc;
+
+fn new_array<T>(shape: Vec<usize>, data: Vec<T>) -> Array<T>
+where
+    T: TypeAware,
+{
+    let shape = Shape::new(shape);
+    let data = Arc::new(data);
+
+    Array::new(shape, data).expect("Data doesn't contain correct number of items for Shape")
+}
+
 mod array_tests {
-    use crate::array::{Array, Data, Shape, TypeAware};
-
-    fn new_array<T>(shape: Vec<isize>, data: Vec<T>) -> Array<T>
-    where
-        T: TypeAware,
-    {
-        let shape = Shape::new(shape);
-        let data = Data::new(data);
-
-        Array::new(shape, data).expect("Data doesn't contain correct number of items for Shape")
-    }
+    use super::new_array;
 
     #[test]
     fn test_eq1() {
@@ -189,19 +193,19 @@ mod shape_tests {
 
     #[test]
     fn test_cast_err1() {
-        let a = Shape::new(vec![3]);
-        let b = Shape::new(vec![4]);
-        let res = a.cast(&b);
-        let expected = Error::Cast(a.clone(), b.clone());
+        let lhs = Shape::new(vec![3]);
+        let rhs = Shape::new(vec![4]);
+        let res = lhs.cast(&rhs);
+        let expected = Error::Cast { lhs, rhs };
         assert_eq!(expected, res.unwrap_err());
     }
 
     #[test]
     fn test_cast_err2() {
-        let a = Shape::new(vec![1, 2]);
-        let b = Shape::new(vec![3, 4, 8]);
-        let res = a.cast(&b);
-        let expected = Error::Cast(a.clone(), b.clone());
+        let lhs = Shape::new(vec![1, 2]);
+        let rhs = Shape::new(vec![3, 4, 8]);
+        let res = lhs.cast(&rhs);
+        let expected = Error::Cast { lhs, rhs };
         assert_eq!(expected, res.unwrap_err());
     }
 
@@ -214,14 +218,98 @@ mod shape_tests {
 
     #[test]
     fn test_volume2() {
-        let a = Shape::new((1..11).collect::<Vec<isize>>());
+        let a = Shape::new((1..11).collect());
         let expected = (1..11).product::<usize>();
         assert_eq!(expected, a.volume());
     }
+}
+
+mod derank_slice_tests {
+    use super::new_array;
+    use crate::array::Error;
 
     #[test]
-    fn test_display1() {
-        let a = Shape::new(vec![1, 2, 3, 4, 5]);
-        assert_eq!(a.to_string(), String::from("[5, 4, 3, 2, 1]"));
+    fn test_derank_0() {
+        let arr = new_array(vec![2, 2], vec![0, 1, 2, 3]);
+        let actual = arr.derank(0).expect("deranking returned an error");
+        let expected = new_array(vec![2], vec![0, 1]);
+        assert_eq!(expected, actual)
+    }
+
+    #[test]
+    fn test_derank_1() {
+        let arr = new_array(vec![2, 2], vec![0, 1, 2, 3]);
+        let actual = arr.derank(1).expect("deranking returned an error");
+        let expected = new_array(vec![2], vec![2, 3]);
+        assert_eq!(expected, actual)
+    }
+
+    #[test]
+    fn test_derank_err_1d() {
+        let arr = new_array(vec![2], vec![0, 1]);
+        let result = arr.derank(1);
+        assert_eq!(result.unwrap_err(), Error::Derank1D)
+    }
+
+    #[test]
+    fn test_derank_err_invalid_index() {
+        let arr = new_array(vec![2, 2], vec![0, 1, 2, 3]);
+        let result = arr.derank(2);
+        assert_eq!(
+            result.unwrap_err(),
+            Error::DerankInvalidIndex { len: 2, index: 2 }
+        )
+    }
+
+    #[test]
+    fn test_slice_0_to_2() {
+        let arr = new_array(vec![2, 3], vec![0, 1, 2, 3, 4, 5]);
+        let actual = arr.slice(0, 2).expect("slicing returned an error");
+        let expected = new_array(vec![2, 2], vec![0, 1, 2, 3]);
+        assert_eq!(expected, actual)
+    }
+
+    #[test]
+    fn test_slice_1_to_3() {
+        let arr = new_array(vec![2, 3], vec![0, 1, 2, 3, 4, 5]);
+        let actual = arr.slice(1, 3).expect("slicing returned an error");
+        let expected = new_array(vec![2, 2], vec![2, 3, 4, 5]);
+        assert_eq!(expected, actual)
+    }
+
+    #[test]
+    fn test_slice_err_zero_width() {
+        let arr = new_array(vec![2, 3], vec![0, 1, 2, 3, 4, 5]);
+        let result = arr.slice(1, 1);
+        assert_eq!(result.unwrap_err(), Error::SliceZeroWidth { index: 1 })
+    }
+
+    #[test]
+    fn test_slice_err_stop_before_step() {
+        let arr = new_array(vec![2, 3], vec![0, 1, 2, 3, 4, 5]);
+        let result = arr.slice(2, 1);
+        assert_eq!(
+            result.unwrap_err(),
+            Error::SliceStopBeforeStart { start: 2, stop: 1 }
+        )
+    }
+
+    #[test]
+    fn test_slice_err_stop_past_end() {
+        let arr = new_array(vec![2, 3], vec![0, 1, 2, 3, 4, 5]);
+        let result = arr.slice(2, 4);
+        assert_eq!(
+            result.unwrap_err(),
+            Error::SliceStopPastEnd { stop: 4, dim: 3 }
+        )
+    }
+
+    #[test]
+    fn test_slice_deranked_1() {
+        let arr = new_array(vec![2, 3], vec![0, 1, 2, 3, 4, 5]);
+        let sliced = arr.slice(1, 3).expect("slicing returned an error");
+        let deranked = sliced.derank(0).expect("deranking returned an error");
+        let expected = new_array(vec![2], vec![2, 3]);
+        assert_eq!(expected, deranked)
     }
 }
