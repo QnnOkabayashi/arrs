@@ -1,25 +1,28 @@
-mod data;
 mod error;
 mod shape;
 mod subarray;
 mod typeaware;
+use core::cmp::PartialEq;
 use core::convert::Into;
 use core::mem::size_of;
 use core::ops;
 use core::slice::Iter;
-pub use data::Data;
 pub use error::{ArrResult, Error};
 pub use shape::Shape;
+use std::sync::Arc;
 use subarray::Subarray;
 pub use typeaware::TypeAware;
 
-#[derive(Debug, PartialEq)]
+type Data<T> = Arc<Vec<T>>;
+
+#[derive(Debug)]
 pub struct Array<T>
 where
     T: TypeAware,
 {
     shape: Shape,
     data: Data<T>,
+    offset: usize,
 }
 
 impl<T> Array<T>
@@ -28,12 +31,24 @@ where
 {
     pub fn new(shape: Shape, data: Data<T>) -> ArrResult<Self> {
         if shape.volume() != data.len() {
-            return Err(Error::ShapeDataMisalignment(shape, data.len()));
+            return Err(Error::ShapeDataMisalignment {
+                shape,
+                data_len: data.len(),
+            });
         }
 
-        Ok(Self { shape, data })
+        Ok(Self::from_parts(shape, data, 0))
     }
 
+    fn from_parts(shape: Shape, data: Data<T>, offset: usize) -> Self {
+        Self {
+            shape,
+            data,
+            offset,
+        }
+    }
+
+    // can probably rewrite most of this once slicing is implemented correctly
     fn zip_map<F, R>(&self, other: &Self, op: F) -> ArrResult<Array<R>>
     where
         F: Fn(T, T) -> R,
@@ -102,12 +117,16 @@ where
         }
     }
 
-    pub fn ndims(&self) -> isize {
+    pub fn ndims(&self) -> usize {
         self.shape().ndims()
     }
 
     pub fn shape(&self) -> &Shape {
         &self.shape
+    }
+
+    pub fn len(&self) -> usize {
+        self.shape().len()
     }
 
     pub fn data_ptr(&self) -> *const T {
@@ -118,13 +137,69 @@ where
         self.data.iter()
     }
 
-    pub fn reshape(self, shape: Shape) -> ArrResult<Array<T>> {
+    pub fn reshape(self, shape: Shape) -> ArrResult<Self> {
         if self.shape.volume() == shape.volume() {
             // TODO: once we have special indexing and iterators
+            // data is all continuous so shouldn't be hard at all
             Array::new(shape, self.data)
         } else {
-            Err(Error::Reshape(self.shape().clone(), shape))
+            Err(Error::Reshape {
+                initial: self.shape().clone(),
+                target: shape,
+            })
         }
+    }
+
+    pub fn get(&self, index: usize) -> ArrResult<T> {
+        if self.ndims() > 1 {
+            return Err(Error::ReadNDim {
+                ndims: self.ndims(),
+            });
+        }
+        if index >= self.len() {
+            return Err(Error::DerankInvalidIndex {
+                len: self.len(),
+                index,
+            });
+        }
+
+        Ok(self.data[self.offset + index])
+    }
+
+    pub fn derank(&self, index: usize) -> ArrResult<Self> {
+        let shape = self.shape().derank(index)?;
+        let data = self.data.clone();
+        let offset = self.shape().inside_volume() * index + self.offset;
+
+        Ok(Self::from_parts(shape, data, offset))
+    }
+
+    pub fn slice(&self, start: usize, stop: usize) -> ArrResult<Self> {
+        let shape = self.shape().slice(start, stop)?;
+        let data = self.data.clone();
+        let offset = self.shape().inside_volume() * start + self.offset;
+
+        Ok(Self::from_parts(shape, data, offset))
+    }
+
+    pub fn fresh_copy(&self) -> Self {
+        // there is no performance benefit to creating a fresh copy!
+        // only do it if you don't want changes reflected in the original
+        let shape = self.shape.clone();
+        let data = Arc::new(self.data[self.offset..shape.volume()].to_vec());
+
+        Self::from_parts(shape, data, 0)
+    }
+}
+
+impl<T> PartialEq for Array<T>
+where
+    T: TypeAware,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.shape() == other.shape()
+            && self.data[self.offset..self.offset + self.shape().volume()]
+                == other.data[other.offset..other.offset + other.shape().volume()]
     }
 }
 
