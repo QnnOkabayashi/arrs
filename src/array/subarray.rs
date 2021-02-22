@@ -6,7 +6,7 @@ where
     T: TypeAware,
 {
     shape: &'a Shape,
-    ndims: isize,
+    ndims: usize,
     data: *const T,
 }
 
@@ -15,31 +15,30 @@ where
     T: TypeAware,
 {
     pub fn new(array: &'a Array<T>) -> Self {
-        let shape = array.shape();
-        let ndims = array.ndims();
-        let data = array.data_ptr();
-
-        Self { shape, ndims, data }
+        Self {
+            shape: array.shape(),
+            ndims: array.ndims(),
+            data: array.data_ptr(),
+        }
     }
 
-    pub fn ndims(&self) -> isize {
+    pub fn ndims(&self) -> usize {
         self.ndims
     }
 
-    pub fn len(&self) -> isize {
-        self.shape.dim(self.ndims() - 1)
+    pub fn len(&self) -> usize {
+        self.shape.dim_at(self.ndims() - 1)
     }
 
-    fn stride(&self) -> isize {
-        self.shape
-            .iter()
-            .take((self.ndims() - 1) as usize)
-            .product()
+    fn stride(&self) -> usize {
+        // make this O(1) by calculating an accumulating stride vec at the start
+        let v = self.shape.get_dims();
+        v.iter().take((self.ndims() - 1) as usize).product()
     }
 
-    pub fn at(&'a self, index: isize) -> Subarray<'a, T> {
+    pub fn at(&'a self, index: usize) -> Subarray<'a, T> {
         assert!(
-            0 <= index && index < self.len(),
+            index < self.len(),
             "index is {}, but len is {}",
             index,
             self.len()
@@ -48,8 +47,9 @@ where
             let shape = self.shape;
             let ndims = self.ndims() - 1;
 
-            // Safe because we guarenteed above that index won't be too large
-            let data = unsafe { self.data.offset(index * self.stride()) };
+            let offset = (index * self.stride()) as isize;
+            // Safe because we guaranteed above that index won't be too large
+            let data = unsafe { self.data.offset(offset) };
 
             Self { shape, ndims, data }
         } else {
@@ -58,7 +58,7 @@ where
     }
 
     pub fn read(&self) -> T {
-        // Safe because self.data is never modified, and is safe at construction
+        // underlying data isn't modified while Subarray exists, pointer doesn't change after construction
         unsafe { *self.data }
     }
 }
