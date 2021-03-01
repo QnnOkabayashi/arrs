@@ -1,11 +1,11 @@
-use super::{Array, Shape, TypeAware};
+use super::{Array1, Shape1, TypeAware};
 
 #[derive(Clone, Copy)]
-pub struct Subarray<'a, T>
+pub(super) struct Subarray<'a, T>
 where
     T: TypeAware,
 {
-    shape: &'a Shape,
+    shape: &'a Shape1,
     ndims: usize,
     data: *const T,
 }
@@ -14,7 +14,7 @@ impl<'a, T> Subarray<'a, T>
 where
     T: TypeAware,
 {
-    pub fn new(array: &'a Array<T>) -> Self {
+    pub fn new(array: &'a Array1<T>) -> Self {
         Self {
             shape: array.shape(),
             ndims: array.ndims(),

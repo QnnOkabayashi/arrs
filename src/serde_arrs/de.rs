@@ -6,9 +6,9 @@ If CSV parsing is ever used, use fast-float crate for parsing
 https://github.com/aldanor/fast-float-rust
 
 */
-use crate::array::Shape;
+use crate::array::Shape1;
 use crate::serde_arrs::error::{Error, Result as SdResult};
-use crate::serde_arrs::{Array, IdxType, TypeAware};
+use crate::serde_arrs::{Array1, IdxType, TypeAware};
 use de::{DeserializeSeed, MapAccess, Visitor};
 use serde::{de, Deserializer};
 use std::{fs::File, io::Read, marker::PhantomData, sync::Arc};
@@ -47,7 +47,7 @@ where
         I::read_be_bytes(&mut self.file)
     }
 
-    pub fn parse(&mut self) -> SdResult<Array<T>> {
+    pub fn parse(&mut self) -> SdResult<Array1<T>> {
         let mut magic = [0; 4];
 
         self.read_buf(&mut magic)?;
@@ -68,7 +68,7 @@ where
             dims.push(self.read::<i32>()? as usize);
         }
 
-        let shape = Shape::new(dims);
+        let shape = Shape1::new(dims);
         let volume = shape.volume();
 
         let mut raw_data = Vec::with_capacity(volume);
@@ -79,7 +79,7 @@ where
         let data = Arc::new(raw_data);
 
         // would've exited earlier if shape and data weren't in sync
-        Ok(Array::new(shape, data).unwrap())
+        Ok(Array1::new(shape, data).unwrap())
     }
 }
 

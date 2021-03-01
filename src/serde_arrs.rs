@@ -1,6 +1,6 @@
 mod de;
 mod error;
-use crate::array::{Array, TypeAware};
+use crate::array::{Array1, TypeAware};
 use de::IdxDeserializer;
 use error::{Error, Result as SdResult};
 use serde::de::Deserialize;
@@ -39,7 +39,7 @@ impl_idxtype! {
     f64: 8
 }
 
-pub fn from_idx<'de, T: 'de>(filename: &str) -> SdResult<Array<T>>
+pub fn from_idx<'de, T: 'de>(filename: &str) -> SdResult<Array1<T>>
 where
     T: IdxType<'de>,
 {
