@@ -1,8 +1,3 @@
-// TODO: combine cast tests from array_tests and shape_tests
-use crate::array::{
-    Array1, ArrayBase, DenseArray, PartialView, Shape, Shape1, ShapeBase, TypeAware,
-};
-
 macro_rules! array {
     ( let $name:ident = Array($dims:expr, $data:expr) ) => {
         // ensures that the name of the base is shadowed
@@ -20,6 +15,20 @@ macro_rules! array {
     ( let $name:ident =? $base:expr ) => {
         let $name = $base.expect("failed to unwrap ArrayBase");
         let $name = <crate::array::DenseArray<i32> as crate::array::PartialView>::from_base(&$name);
+    };
+}
+
+macro_rules! shape {
+    ( let $name:ident = Shape($dims:expr) ) => {
+        let $name = crate::array::ShapeBase::new_checked($dims).expect("failed to create shape");
+        let $name = <crate::array::Shape as crate::array::PartialView>::from_base(&$name);
+    };
+    ( let $name:ident = $dim:expr ) => {
+        shape!(let $name = Shape(vec![$dim]));
+    };
+    ( let $name:ident =? $broadcasted:expr ) => {
+        let ($name, _) = $broadcasted.expect("broadcast failed");
+        let $name = <crate::array::Shape as crate::array::PartialView>::from_base(&$name);
     };
 }
 
@@ -56,7 +65,6 @@ mod array_tests {
         array!(let arr1 = 10);
         array!(let arr2 = Array(vec![2,2], vec![0,1,2,3]));
 
-        // broken, figure out later
         array!(let expected = Array(vec![2,2], vec![0,10,20,30]));
         array!(let actual =? arr1.mul(&arr2));
 
@@ -94,38 +102,6 @@ mod array_tests {
         array!(let actual =? arr1.mul(&arr2));
 
         assert_eq!(expected, actual);
-    }
-}
-
-macro_rules! shape {
-    ( let $name:ident = Shape($dims:expr) ) => {
-        let $name = crate::array::ShapeBase::new_checked($dims).expect("failed to create shape");
-        let $name = <crate::array::Shape as crate::array::PartialView>::from_base(&$name);
-    };
-    ( let $name:ident = $dim:expr ) => {
-        shape!(let $name = Shape(vec![$dim]));
-    };
-    ( let $name:ident =? $broadcasted:expr ) => {
-        let ($name, _) = $broadcasted.expect("broadcast failed");
-        let $name = <crate::array::Shape as crate::array::PartialView>::from_base(&$name);
-    };
-}
-
-mod serde_arrs_tests {
-
-    #[test]
-    fn read_correct_ndims() {
-        array!(let test_imgs = IDX("idx-files/t10k-images-idx3-ubyte"));
-
-        assert_eq!(test_imgs.ndims(), 3)
-    }
-
-    #[test]
-    fn read_correct_dims() {
-        array!(let test_imgs = IDX("idx-files/t10k-images-idx3-ubyte"));
-        shape!(let expected = Shape(vec![10000, 28, 28]));
-
-        assert_eq!(&expected, test_imgs.shape())
     }
 }
 
@@ -348,5 +324,23 @@ mod derank_slice_tests {
         let deranked = sliced.derank(0).expect("deranking returned an error");
         array!(let expected = Array(vec![2], vec![2, 3]));
         assert_eq!(expected, deranked)
+    }
+}
+
+mod array_idx_tests {
+
+    #[test]
+    fn read_correct_ndims() {
+        array!(let test_imgs = IDX("idx-files/t10k-images-idx3-ubyte"));
+
+        assert_eq!(test_imgs.ndims(), 3)
+    }
+
+    #[test]
+    fn read_correct_dims() {
+        array!(let test_imgs = IDX("idx-files/t10k-images-idx3-ubyte"));
+        shape!(let expected = Shape(vec![10000, 28, 28]));
+
+        assert_eq!(&expected, test_imgs.shape())
     }
 }
