@@ -3,19 +3,22 @@ mod shape;
 mod subarray;
 mod traits;
 use core::cmp::PartialEq;
-use core::convert::Into;
+use core::convert::{From, Into};
 use core::mem::size_of;
 use core::ops;
 use core::slice::Iter;
 pub use error::{ArrResult, Error};
-pub use shape::{Shape, Shape1, ShapeBase};
 use shape::BroadcastInstruction;
+pub use shape::{Shape, Shape1, ShapeBase};
 use std::{fmt::Debug, sync::Arc};
 use subarray::Subarray;
-pub use traits::{TypeAware, PartialView};
+pub use traits::{PartialView, TypeAware};
+
+use self::traits::IdxType;
 
 // to embed, use an Rc instead depending on no_std
 // https://www.reddit.com/r/rust/comments/49hlsf/no_std_library_optionally_depending_onusing_std/
+// #[cfg(not(no_std))]
 type Data<T> = Arc<Vec<T>>;
 
 pub struct ArrayBase<T: TypeAware> {
@@ -25,7 +28,7 @@ pub struct ArrayBase<T: TypeAware> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 // DenseArray is a PartialView of ArrayBase where elements
-// are stored contiguously in memory. This means fast 
+// are stored contiguously in memory. This means fast
 // but restrictive array indexing
 pub struct DenseArray<'base, T: TypeAware> {
     shape: Shape<'base>,
@@ -47,6 +50,49 @@ impl<T: TypeAware> ArrayBase<T> {
     }
 }
 
+#[cfg(not(no_std))]
+impl<T: IdxType> ArrayBase<T> {
+    pub fn from_idx(filename: &'static str) -> ArrResult<Self> {
+        use std::fs::File;
+        use std::io::Read;
+
+        let mut file = File::open(filename)?;
+        let mut magic = [0; 4];
+        if file.read(&mut magic)? < 4 {
+            return Err(Error::IdxReadUnaccepted);
+        }
+
+        let magic_dtype = magic[2];
+        if magic_dtype != T::ID {
+            return Err(Error::MismatchDTypeIDs {
+                dtype1: T::ID,
+                dtype2: magic_dtype,
+            });
+        }
+
+        let ndims = magic[3] as usize;
+
+        let mut dims = Vec::with_capacity(ndims);
+        for _ in 0..ndims {
+            dims.push(<i32 as IdxType>::read(&mut file)? as usize);
+        }
+
+        let shape_base = ShapeBase::new_checked(dims)?;
+        let volume = shape_base.total_volume();
+
+        let mut data = Vec::with_capacity(volume);
+        for _ in 0..volume {
+            data.push(<T as IdxType>::read(&mut file)?);
+        }
+
+        Ok(Self { shape_base, data })
+    }
+
+    pub fn into_idx(&self, filename: &'static str) -> ArrResult<()> {
+        todo!()
+    }
+}
+
 // struct SparseArray; // dynamic access patterns
 
 impl<'a, T: TypeAware> DenseArray<'a, T> {
@@ -56,6 +102,10 @@ impl<'a, T: TypeAware> DenseArray<'a, T> {
 
     pub fn len(&self) -> usize {
         self.data.len()
+    }
+
+    pub fn shape(&self) -> &Shape {
+        &self.shape
     }
 
     fn at(&self, index: usize) -> T {
@@ -142,17 +192,23 @@ impl<'a, T: TypeAware> DenseArray<'a, T> {
                         }
                         RecurseLinear => {
                             for index in 0..a.shape.len() {
-                                recurse(a.derank(index)?, b.derank(index)?, sub_instructions, data, op)?;
+                                recurse(
+                                    a.derank(index)?,
+                                    b.derank(index)?,
+                                    sub_instructions,
+                                    data,
+                                    op,
+                                )?;
                             }
                         }
                         RecurseStretchA => {
                             for i in 0..b.shape.len() {
-                                recurse(a.clone(), b.slice(i, i+1)?, sub_instructions, data, op)?;
+                                recurse(a.clone(), b.slice(i, i + 1)?, sub_instructions, data, op)?;
                             }
                         }
                         RecurseStretchB => {
                             for i in 0..a.shape.len() {
-                                recurse(a.slice(i, i+1)?, b.clone(), sub_instructions, data, op)?;
+                                recurse(a.slice(i, i + 1)?, b.clone(), sub_instructions, data, op)?;
                             }
                         }
                         RecursePadA => {
@@ -169,12 +225,25 @@ impl<'a, T: TypeAware> DenseArray<'a, T> {
                     Ok(())
                 }
 
-                recurse(self.clone(), other.clone(), &broadcast_instructions, &mut data, &op)?;
+                recurse(
+                    self.clone(),
+                    other.clone(),
+                    &broadcast_instructions,
+                    &mut data,
+                    &op,
+                )?;
 
                 Ok(ArrayBase { shape_base, data })
             }
             Err(e) => Err(e),
         }
+    }
+
+    fn as_type<R: TypeAware + From<T>>(&self) -> ArrayBase<R> {
+        let shape_base = self.shape.into_base();
+        let data = self.data.iter().map(|x| R::from(*x)).collect();
+
+        ArrayBase { shape_base, data }
     }
 }
 
@@ -227,33 +296,6 @@ macro_rules! impl_array_op {
     }
 }
 
-macro_rules! impl_array_astype {
-    { $( $name:ident for $inner_type:tt where id: $id:expr),* } => {
-        $(
-            impl TypeAware for $inner_type {
-                const ID: u8 = $id;
-
-                const BYTES: usize = size_of::<$inner_type>();
-
-                const LABEL: &'static str = stringify!($inner_type);
-            }
-
-            impl<'a, T> DenseArray<'a, T>
-            where
-                T: TypeAware + Into<$inner_type>,
-            {
-                pub fn $name(&self) -> ArrayBase<$inner_type> {
-                    let shape_base = self.shape.into_base();
-                    let data = self.data.iter().map(|x| Into::<$inner_type>::into(*x)).collect();
-
-                    ArrayBase{ shape_base, data }
-                }
-            }
-            // do ArrayMut here later
-        )*
-    }
-}
-
 impl_array_cmp! {
     v_eq: |a, b| a == b,
     v_ne: |a, b| a != b,
@@ -269,16 +311,6 @@ impl_array_op! {
     mul(ops::Mul): |a, b| a * b,
     div(ops::Div): |a, b| a / b,
     rem(ops::Rem): |a, b| a % b
-}
-
-impl_array_astype! {
-    astype_bool for bool where id: 0x07,
-    astype_uint8 for u8 where id: 0x08,
-    astype_int8 for i8 where id: 0x09,
-    astype_int16 for i16 where id: 0x0B,
-    astype_int32 for i32 where id: 0x0C,
-    astype_float32 for f32 where id: 0x0D,
-    astype_float64 for f64 where id: 0x0E
 }
 
 #[derive(Debug, Clone)]
