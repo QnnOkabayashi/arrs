@@ -1,8 +1,7 @@
-use crate::array::{Shape, Shape1};
 use core::convert::From;
-use std::io;
 use std::{
     fmt::{self, Display},
+    io::Error as IoError,
     result::Result,
 };
 
@@ -10,17 +9,9 @@ pub type ArrResult<T> = Result<T, Error>;
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
-    Cast {
-        lhs: Shape1,
-        rhs: Shape1,
-    }, // remove once new shapes work
     Broadcast {
         dims1: Vec<usize>,
         dims2: Vec<usize>,
-    },
-    Reshape {
-        initial: Shape1,
-        target: Shape1,
     },
     ShapeZeroDims,
     ShapeZeroLenDim {
@@ -30,10 +21,6 @@ pub enum Error {
         shape_volume: usize,
         data_len: usize,
     },
-    ShapeDataMisalignment1 {
-        shape: Shape1,
-        data_len: usize,
-    }, // remove once new shapes work
     FromIdxFile {
         filename: &'static str,
     },
@@ -71,28 +58,11 @@ pub enum Error {
 impl Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Cast { lhs, rhs } => {
-                write!(
-                    f,
-                    "operands could not be broadcast together with shapes {}, {}",
-                    lhs, rhs
-                )
-            }
             Self::Broadcast { dims1, dims2 } => {
                 write!(
                     f,
                     "operands could not be broadcast together with shapes {:?}, {:?}",
                     dims1, dims2
-                )
-            }
-            Self::Reshape { initial, target } => {
-                write!(
-                    f,
-                    "cannot reshape: shapes have different volumes (a: {:?} -> {}, b: {:?} -> {})",
-                    initial,
-                    initial.volume(),
-                    target,
-                    target.volume()
                 )
             }
             Self::ShapeZeroDims => {
@@ -109,14 +79,6 @@ impl Display for Error {
                     f,
                     "shape volume is {}, but {} elements were provided",
                     shape_volume, data_len
-                )
-            }
-            Self::ShapeDataMisalignment1 { shape, data_len } => {
-                write!(
-                    f,
-                    "array expected {} elements, but shape has volume {}",
-                    data_len,
-                    shape.volume()
                 )
             }
             Self::FromIdxFile { filename } => {
@@ -172,8 +134,8 @@ impl Display for Error {
     }
 }
 
-impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Self {
+impl From<IoError> for Error {
+    fn from(err: IoError) -> Self {
         Self::IdxIO {
             message: err.to_string(),
         }
