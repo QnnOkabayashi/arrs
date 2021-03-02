@@ -1,4 +1,6 @@
 use crate::array::{Shape, Shape1};
+use core::convert::From;
+use std::io;
 use std::{
     fmt::{self, Display},
     result::Result,
@@ -53,6 +55,16 @@ pub enum Error {
     SliceStopPastEnd {
         stop: usize,
         dim: usize,
+    },
+    IdxIO {
+        // io::Error doesn't impl PartialEq, which is annoying
+        message: String,
+    },
+    IdxReadUnaccepted,
+    IdxWriteUnaccepted,
+    MismatchDTypeIDs {
+        dtype1: u8,
+        dtype2: u8,
     },
 }
 
@@ -146,6 +158,24 @@ impl Display for Error {
                     dim_width, slice_width
                 )
             }
+            Self::IdxIO { message } => f.write_str(&message),
+            Self::IdxReadUnaccepted => {
+                write!(f, "reader no longer providing bytes")
+            }
+            Self::IdxWriteUnaccepted => {
+                write!(f, "writer no longer accepting bytes")
+            }
+            Self::MismatchDTypeIDs { dtype1, dtype2 } => {
+                write!(f, "expected dtype ID: {}, found ID: {}", dtype1, dtype2)
+            }
+        }
+    }
+}
+
+impl From<io::Error> for Error {
+    fn from(err: io::Error) -> Self {
+        Self::IdxIO {
+            message: err.to_string(),
         }
     }
 }
