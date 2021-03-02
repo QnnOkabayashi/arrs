@@ -5,6 +5,7 @@ use core::{
     iter::once,
 };
 
+#[derive(Debug)]
 pub struct ShapeBase {
     dims: Vec<usize>,
     volumes: Vec<usize>,
@@ -30,7 +31,7 @@ impl ShapeBase {
         Self { dims, volumes }
     }
 
-    pub(super) fn new_checked(dims: Vec<usize>) -> ArrResult<Self> {
+    pub fn new_checked(dims: Vec<usize>) -> ArrResult<Self> {
         if dims.len() == 0 {
             return Err(Error::ShapeZeroDims);
         } else if dims.iter().any(|&dim| dim == 0) {
@@ -68,8 +69,16 @@ impl<'a> Shape<'a> {
         self.len
     }
 
+    pub fn volume(&self) -> usize {
+        self.volume
+    }
+
     fn dims_iter(&self) -> impl DoubleEndedIterator<Item = &usize> {
         self.sub_dims.iter().chain(once(&self.len))
+    }
+
+    pub fn to_vec(&self) -> Vec<usize> {
+        self.dims_iter().copied().collect()
     }
 
     pub(super) fn stride(&self) -> usize {
@@ -118,7 +127,7 @@ impl<'a> Shape<'a> {
         Ok(self.slice(stop - start))
     }
 
-    pub(super) fn broadcast(&self, other: &Self) -> ArrResult<(ShapeBase, Vec<BroadcastInstruction>)> {
+    pub fn broadcast(&self, other: &Self) -> ArrResult<(ShapeBase, Vec<BroadcastInstruction>)> {
         use BroadcastInstruction::*;
         let result_ndims = max(self.ndims(), other.ndims());
         let mut dims = Vec::with_capacity(result_ndims);
@@ -152,8 +161,8 @@ impl<'a> Shape<'a> {
                 }
                 _ => {
                     return Err(Error::Broadcast {
-                        dims1: self.dims_iter().rev().copied().collect(),
-                        dims2: other.dims_iter().rev().copied().collect(),
+                        dims1: self.to_vec(),
+                        dims2: other.to_vec(),
                     })
                 }
             }
@@ -163,7 +172,9 @@ impl<'a> Shape<'a> {
             RecurseLinear => PushLinear,
             RecurseStretchA => PushStretchA,
             RecurseStretchB => PushStretchB,
-            _ => panic!("This pattern is unreachable because it would require a shape with zero dims"),
+            _ => panic!(
+                "This pattern is unreachable because it would require a shape with zero dims"
+            ),
         };
 
         Ok((ShapeBase::new(dims), broadcast_instructions))
@@ -193,8 +204,8 @@ impl<'base> PartialView<'base> for Shape<'base> {
     }
 }
 
-#[derive(Clone, Copy)]
-pub(super) enum BroadcastInstruction {
+#[derive(Clone, Copy, Debug)]
+pub enum BroadcastInstruction {
     PushLinear,
     PushStretchA,
     PushStretchB,
@@ -204,7 +215,6 @@ pub(super) enum BroadcastInstruction {
     RecursePadA,
     RecursePadB,
 }
-
 
 // lowest dimensions are first
 #[derive(Debug, Clone)]
