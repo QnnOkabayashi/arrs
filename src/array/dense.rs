@@ -1,28 +1,15 @@
-use crate::array::{ArrResult, ArrayBase, Broadcastable, Error, PartialView, Shape, TypeAware};
-use core::ops::{Add, Div, Mul, Rem, Sub};
-use core::slice::Iter;
-use std::slice::ChunksExact;
+use crate::array::{ArrResult, ArrayBase, Error, MultiDimensional, PartialView, Shape, TypeAware};
+use core::slice::{ChunksExact, Iter};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-// DenseArray is a PartialView of ArrayBase where elements
-// are stored contiguously in memory. This means fast
-// but restrictive array indexing
 pub struct Array<'base, T: TypeAware> {
     shape: Shape<'base>,
     data: &'base [T],
 }
 
 impl<'a, T: TypeAware> Array<'a, T> {
-    pub fn ndims(&self) -> usize {
-        self.shape.ndims()
-    }
-
     pub fn len(&self) -> usize {
         self.data.len()
-    }
-
-    pub fn shape(&self) -> &Shape {
-        &self.shape
     }
 
     fn at(&self, index: usize) -> T {
@@ -87,90 +74,46 @@ impl<'base, T: TypeAware> PartialView<'base> for Array<'base, T> {
     }
 }
 
-impl<'base, T: TypeAware> Broadcastable<'base, T> for Array<'base, T> {
-    type SubIterator = SubIterator<'base, T>;
+impl<'base, T: TypeAware> MultiDimensional<'base, T> for Array<'base, T> {
+    type SubviewIterator = DenseIterator<'base, T>;
 
-    fn one_data(&self) -> T {
+    fn ndims(&self) -> usize {
+        self.shape.ndims()
+    }
+
+    fn shape(&self) -> &Shape {
+        &self.shape
+    }
+
+    fn one_value(&self) -> T {
         self.data[0]
     }
 
-    fn iter_flat_data(&self) -> Iter<T> {
+    fn iter_values(&self) -> Iter<T> {
         self.data.iter()
     }
 
-    fn one_subarray(&self) -> Self {
+    fn one_subview(&self) -> Self {
         let shape = self.shape.derank();
         let data = &self.data[..self.shape.stride()];
 
         Self { shape, data }
     }
 
-    fn iter_subarray(&self) -> Self::SubIterator {
+    fn iter_subviews(&self) -> Self::SubviewIterator {
         let shape = self.shape.derank();
         let chunks = self.data.chunks_exact(shape.volume());
 
-        Self::SubIterator { shape, chunks }
-    }
-
-    fn shape(&self) -> &Shape {
-        &self.shape
+        Self::SubviewIterator { shape, chunks }
     }
 }
 
-macro_rules! impl_array_cmp {
-    { $( $name:ident: $e:expr ),* } => {
-        impl<'a, T> Array<'a, T>
-        where
-            T: TypeAware + PartialOrd
-        {
-            $(
-                pub fn $name(&self, other: &Self) -> ArrResult<ArrayBase<bool>> {
-                    self.broadcast_combine(other, $e)
-                }
-            )*
-        }
-    }
-}
-
-macro_rules! impl_array_op {
-    { $( $op:ident($op_trait:path): $func:expr ),* } => {
-        $(
-            impl<'a, T> Array<'a, T>
-            where
-                T: TypeAware + $op_trait,
-                <T as $op_trait>::Output: TypeAware,
-            {
-                pub fn $op(&self, other: &Self) -> ArrResult<ArrayBase<<T as $op_trait>::Output>> {
-                    self.broadcast_combine(other, $func)
-                }
-            }
-        )*
-    }
-}
-
-impl_array_cmp! {
-    v_eq: |a, b| a == b,
-    v_ne: |a, b| a != b,
-    v_lt: |a, b| a < b,
-    v_le: |a, b| a <= b,
-    v_gt: |a, b| a > b,
-    v_ge: |a, b| a >= b
-}
-
-impl_array_op! {
-    add(Add): |a, b| a + b,
-    sub(Sub): |a, b| a - b,
-    mul(Mul): |a, b| a * b,
-    div(Div): |a, b| a / b,
-    rem(Rem): |a, b| a % b
-}
-
-pub struct SubIterator<'base, T: TypeAware> {
+pub struct DenseIterator<'base, T: TypeAware> {
     shape: Shape<'base>,
     chunks: ChunksExact<'base, T>,
 }
 
-impl<'base, T: TypeAware> Iterator for SubIterator<'base, T> {
+impl<'base, T: TypeAware> Iterator for DenseIterator<'base, T> {
     type Item = Array<'base, T>;
 
     fn next(&mut self) -> Option<Self::Item> {
