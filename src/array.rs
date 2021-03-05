@@ -32,7 +32,7 @@ impl<T: TypeAware> ArrayBase<T> {
 mod idx {
     use crate::array::{ArrResult, ArrayBase, Error, ShapeBase, TypeAware};
     use std::fs::File;
-    use std::io::{Read, Write};
+    use std::io::{Read, Write, Error as IoError};
 
     pub trait IdxType: TypeAware {
         const ID: u8;
@@ -118,6 +118,14 @@ mod idx {
                 "can't read '{}' because this function isn't implemented",
                 filename
             )
+        }
+    }
+
+    impl From<IoError> for Error {
+        fn from(err: IoError) -> Self {
+            Self::IdxIO {
+                message: err.to_string(),
+            }
         }
     }
 }
