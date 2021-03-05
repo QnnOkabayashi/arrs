@@ -33,6 +33,7 @@ macro_rules! shape {
 }
 
 mod array_tests {
+    use crate::array::MultiDimensional;
     #[test]
     fn test_eq_1() {
         array!(let arr1 = Array(vec![2,2], vec![0,1,2,3]));
@@ -55,7 +56,7 @@ mod array_tests {
         array!(let arr2 = Array(vec![4], vec![0, 1, 2, 3]));
 
         array!(let expected = Array(vec![4], vec![0, 10, 20, 30]));
-        array!(let actual =? arr1.mul(&arr2));
+        array!(let actual =? arr1.mul_v(&arr2));
 
         assert_eq!(expected, actual);
     }
@@ -66,7 +67,7 @@ mod array_tests {
         array!(let arr2 = Array(vec![2,2], vec![0,1,2,3]));
 
         array!(let expected = Array(vec![2,2], vec![0,10,20,30]));
-        array!(let actual =? arr1.mul(&arr2));
+        array!(let actual =? arr1.mul_v(&arr2));
 
         assert_eq!(expected, actual);
     }
@@ -77,7 +78,7 @@ mod array_tests {
         array!(let arr2 = Array(vec![2, 3], vec![0, 1, 2, 3, 4, 5]));
         array!(let expected = Array(vec![2, 3], vec![0, 1, 0, 3, 0, 5]));
 
-        array!(let actual =? arr1.mul(&arr2));
+        array!(let actual =? arr1.mul_v(&arr2));
 
         assert_eq!(expected, actual);
     }
@@ -88,7 +89,7 @@ mod array_tests {
         array!(let arr2 = Array(vec![1, 2], vec![0, 1]));
         array!(let expected = Array(vec![2, 2, 2], vec![0, 0, 2, 3, 0, 0, 6, 7]));
 
-        array!(let actual =? arr1.mul(&arr2));
+        array!(let actual =? arr1.mul_v(&arr2));
 
         assert_eq!(expected, actual);
     }
@@ -99,7 +100,51 @@ mod array_tests {
         array!(let arr2 = Array(vec![1, 2], vec![0, 1]));
         array!(let expected = Array(vec![2, 2, 2], vec![0, 0, 2, 3, 0, 0, 6, 7]));
 
-        array!(let actual =? arr1.mul(&arr2));
+        array!(let actual =? arr1.mul_v(&arr2));
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn plus1() {
+        array!(let arr1 = Array(vec![2,2], vec![0,1,2,3]));
+        array!(let arr2 = Array(vec![2,2], vec![3,2,1,0]));
+        array!(let expected = Array(vec![2,2], vec![3,3,3,3]));
+
+        array!(let actual =? arr1.add_v(&arr2));
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn plus2() {
+        array!(let arr1 = 10);
+        array!(let arr2 = Array(vec![2,2], vec![12,13,14,15]));
+        array!(let expected = Array(vec![2,2], vec![22,23,24,25]));
+
+        array!(let actual =? arr1.add_v(&arr2));
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn minus1() {
+        array!(let arr1 = Array(vec![2,2], vec![0,1,2,3]));
+        array!(let arr2 = Array(vec![2,2], vec![3,2,1,0]));
+        array!(let expected = Array(vec![2,2], vec![-3,-1,1,3]));
+
+        array!(let actual =? arr1.sub_v(&arr2));
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn minus2() {
+        array!(let arr1 = 10);
+        array!(let arr2 = Array(vec![2,2], vec![12,13,14,15]));
+        array!(let expected = Array(vec![2,2], vec![-2,-3,-4,-5]));
+
+        array!(let actual =? arr1.sub_v(&arr2));
 
         assert_eq!(expected, actual);
     }
@@ -328,6 +373,7 @@ mod derank_slice_tests {
 }
 
 mod array_idx_tests {
+    use crate::array::MultiDimensional;
 
     #[test]
     fn read_correct_ndims() {
