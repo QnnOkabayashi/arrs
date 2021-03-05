@@ -8,6 +8,8 @@ pub struct ShapeBase {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// TODO: reverse the order of dims so slicing can
+// just be &self.dims[1..]
 pub struct Shape<'a> {
     len: usize,
     volume: usize,
