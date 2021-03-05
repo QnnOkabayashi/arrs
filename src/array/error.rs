@@ -1,9 +1,6 @@
 use core::convert::From;
-use std::{
-    fmt::{self, Display},
-    io::Error as IoError,
-    result::Result,
-};
+use core::fmt::{self, Display};
+use core::result::Result;
 
 pub type ArrResult<T> = Result<T, Error>;
 
@@ -134,10 +131,3 @@ impl Display for Error {
     }
 }
 
-impl From<IoError> for Error {
-    fn from(err: IoError) -> Self {
-        Self::IdxIO {
-            message: err.to_string(),
-        }
-    }
-}
