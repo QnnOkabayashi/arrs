@@ -1,198 +1,71 @@
-use crate::array::{ArrResult, Error, PartialView};
-use core::{cmp, iter::once};
+use crate::array::{max_const, ArrResult, Error};
 
-#[derive(Debug)]
-pub struct ShapeBase {
-    dims: Vec<usize>,
-    volumes: Vec<usize>,
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// leftmost dim is innermost, rightmost dim is outermost
+pub struct Shape<const NDIMS: usize>([usize; NDIMS]);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-// TODO: reverse the order of dims so slicing can
-// just be &self.dims[1..]
-pub struct Shape<'a> {
-    len: usize,
-    volume: usize,
-    sub_dims: &'a [usize],
-    sub_volumes: &'a [usize],
-}
-
-impl ShapeBase {
-    pub(self) fn new(dims: Vec<usize>) -> Self {
-        let volumes = once(1)
-            .chain(dims.iter().scan(1, |volume, &dim| {
-                *volume *= dim;
-                Some(*volume)
-            }))
-            .collect();
-
-        Self { dims, volumes }
+impl<const NDIMS: usize> Shape<NDIMS> {
+    pub fn new(dims: [usize; NDIMS]) -> Self {
+        Self(dims)
     }
 
-    pub fn new_checked(dims: Vec<usize>) -> ArrResult<Self> {
-        if dims.len() == 0 {
-            return Err(Error::ShapeZeroDims);
-        } else if dims.iter().any(|&dim| dim == 0) {
-            return Err(Error::ShapeZeroLenDim { dims });
-        }
-
-        Ok(Self::new(dims))
-    }
-
-    pub(super) fn total_volume(&self) -> usize {
-        *self.volumes.last().unwrap()
-    }
-}
-
-impl<'a> Shape<'a> {
-    pub(super) fn ndims(&self) -> usize {
-        self.sub_dims.len() + 1
-    }
-
-    pub(super) fn len(&self) -> usize {
-        self.len
-    }
-
-    pub fn volume(&self) -> usize {
-        self.volume
-    }
-
-    fn dims_iter(&self) -> impl DoubleEndedIterator<Item = &usize> {
-        self.sub_dims.iter().chain(once(&self.len))
+    pub fn dims(&self) -> [usize; NDIMS] {
+        self.0
     }
 
     pub fn to_vec(&self) -> Vec<usize> {
-        self.dims_iter().copied().collect()
+        self.0.to_vec()
     }
 
-    pub(super) fn stride(&self) -> usize {
-        // SAFETY: sub_volumes always starts with an extra 1
-        *self.sub_volumes.last().unwrap()
+    pub fn volume(&self) -> usize {
+        self.0.iter().product()
     }
 
-    pub fn derank(&self) -> Self {
-        let (&len, sub_dims) = self.sub_dims.split_last().unwrap();
-        let (&volume, sub_volumes) = self.sub_volumes.split_last().unwrap();
-
-        Self {
-            len,
-            volume,
-            sub_dims,
-            sub_volumes,
-        }
-    }
-
-    fn slice(&self, len: usize) -> Self {
-        let volume = len * self.sub_volumes.last().unwrap();
-
-        Self {
-            len,
-            volume,
-            sub_dims: self.sub_dims,
-            sub_volumes: self.sub_volumes,
-        }
-    }
-
-    pub(super) fn derank_checked(&self, index: usize) -> ArrResult<Shape> {
-        if self.sub_dims.len() == 0 {
-            return Err(Error::Derank1D);
-        } else if index >= self.len {
-            return Err(Error::DerankIndexOutOfBounds {
-                len: self.len,
-                index,
-            });
-        }
-
-        Ok(self.derank())
-    }
-
-    pub(super) fn slice_checked(&self, start: usize, stop: usize) -> ArrResult<Shape> {
-        if start == stop {
-            return Err(Error::SliceZeroWidth { index: start });
-        } else if start > stop {
-            return Err(Error::SliceStopBeforeStart { start, stop });
-        } else if stop > self.len {
-            return Err(Error::SliceStopPastEnd {
-                stop,
-                dim: self.len,
-            });
-        }
-
-        Ok(self.slice(stop - start))
-    }
-
-    pub fn broadcast(&self, other: &Self) -> ArrResult<(ShapeBase, Vec<BroadcastInstruction>)> {
+    pub fn broadcast<const NDIMS2: usize>(
+        &self,
+        other: &Shape<NDIMS2>,
+    ) -> ArrResult<(
+        Shape<{ max_const(NDIMS, NDIMS2) }>,
+        [BroadcastInstruction; max_const(NDIMS, NDIMS2)],
+    )> {
         use BroadcastInstruction::*;
-        let result_ndims = cmp::max(self.ndims(), other.ndims());
-        let mut dims = Vec::with_capacity(result_ndims);
-        let mut broadcast_instructions = Vec::with_capacity(result_ndims);
+        let mut dims = [0; max_const(NDIMS, NDIMS2)];
+        let mut instructions = [PushLinear; max_const(NDIMS, NDIMS2)];
 
-        let mut iter1 = self.dims_iter();
-        let mut iter2 = other.dims_iter();
+        let (mut iter_a, mut iter_b) = (self.0.iter(), other.0.iter());
+        let (mut stride_a, mut stride_b) = (1, 1);
 
-        loop {
-            match (iter1.next(), iter2.next()) {
-                (None, None) => break,
-                (Some(&a), Some(&b)) if a == b => {
-                    broadcast_instructions.push(RecurseLinear);
-                    dims.push(a);
-                }
-                (Some(&a), Some(1)) => {
-                    broadcast_instructions.push(RecurseStretchB);
-                    dims.push(a);
-                }
-                (Some(1), Some(&b)) => {
-                    broadcast_instructions.push(RecurseStretchA);
-                    dims.push(b);
-                }
-                (Some(&a), None) => {
-                    broadcast_instructions.push(RecursePadB);
-                    dims.push(a);
-                }
-                (None, Some(&b)) => {
-                    broadcast_instructions.push(RecursePadA);
-                    dims.push(b);
-                }
+        for (dim, instruction) in dims.iter_mut().zip(instructions.iter_mut()) {
+            let (next_a, next_b) = (iter_a.next(), iter_b.next());
+
+            let (d, i) = match (next_a, next_b) {
+                (Some(&a), Some(&b)) if a == b => (a, RecurseLinear { stride_a, stride_b }),
+                (Some(&a), Some(1)) | (Some(&a), None) => (a, RecurseStretchB { stride_a }),
+                (Some(1), Some(&b)) | (None, Some(&b)) => (b, RecurseStretchA { stride_b }),
+                (None, None) => unreachable!(),
                 _ => {
                     return Err(Error::Broadcast {
-                        dims1: self.to_vec(),
-                        dims2: other.to_vec(),
+                        dims1: self.0.to_vec(),
+                        dims2: other.0.to_vec(),
                     })
                 }
-            }
+            };
+
+            stride_a *= next_a.unwrap_or(&1);
+            stride_b *= next_b.unwrap_or(&1);
+
+            *dim = d;
+            *instruction = i;
         }
 
-        broadcast_instructions[0] = match broadcast_instructions[0] {
-            RecurseLinear => PushLinear,
-            RecurseStretchA => PushStretchA,
-            RecurseStretchB => PushStretchB,
+        instructions[0] = match instructions[0] {
+            RecurseLinear { .. } => PushLinear,
+            RecurseStretchA { .. } => PushStretchA,
+            RecurseStretchB { .. } => PushStretchB,
             _ => unreachable!(),
         };
 
-        Ok((ShapeBase::new(dims), broadcast_instructions))
-    }
-}
-
-impl<'base> PartialView<'base> for Shape<'base> {
-    type Base = ShapeBase;
-
-    fn from_base(base: &'base Self::Base) -> Self {
-        let (&len, sub_dims) = base.dims.split_last().unwrap();
-        let (&volume, sub_volumes) = base.volumes.split_last().unwrap();
-
-        Self {
-            len,
-            volume,
-            sub_dims,
-            sub_volumes,
-        }
-    }
-
-    fn into_base(&self) -> Self::Base {
-        // recalculating volume is O(n)
-        // copying with a chain iter is O(n)
-        // may as well recalculate
-        ShapeBase::new(self.dims_iter().copied().collect())
+        Ok((Shape(dims), instructions))
     }
 }
 
@@ -201,9 +74,7 @@ pub enum BroadcastInstruction {
     PushLinear,
     PushStretchA,
     PushStretchB,
-    RecurseLinear,
-    RecurseStretchA,
-    RecurseStretchB,
-    RecursePadA,
-    RecursePadB,
+    RecurseLinear { stride_a: usize, stride_b: usize },
+    RecurseStretchA { stride_b: usize },
+    RecurseStretchB { stride_a: usize },
 }
