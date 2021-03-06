@@ -1,4 +1,3 @@
-use core::convert::From;
 use core::fmt::{self, Display};
 use core::result::Result;
 
@@ -6,6 +5,10 @@ pub type ArrResult<T> = Result<T, Error>;
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
+    MatMul {
+        rows_a: usize,
+        cols_b: usize,
+    },
     Broadcast {
         dims1: Vec<usize>,
         dims2: Vec<usize>,
@@ -15,7 +18,7 @@ pub enum Error {
         dims: Vec<usize>,
     },
     ShapeDataMisalignment {
-        shape_volume: usize,
+        volume: usize,
         data_len: usize,
     },
     FromIdxFile {
@@ -46,30 +49,42 @@ pub enum Error {
     },
     IdxReadUnaccepted,
     IdxWriteUnaccepted,
-    MismatchDTypeIDs {
-        dtype1: u8,
-        dtype2: u8,
+    IdxMismatchDTypeIDs {
+        expected: u8,
+        actual: u8,
+    },
+    IdxMismatchNDims {
+        expected: u8,
+        actual: u8,
     },
 }
 
 impl Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use Error::*;
         match self {
-            Self::Broadcast { dims1, dims2 } => {
+            MatMul { rows_a, cols_b } => {
+                write!(
+                    f,
+                    "cannot matrix multiply: first has {} rows, second has {} cols",
+                    rows_a, cols_b
+                )
+            }
+            Broadcast { dims1, dims2 } => {
                 write!(
                     f,
                     "operands could not be broadcast together with shapes {:?}, {:?}",
                     dims1, dims2
                 )
             }
-            Self::ShapeZeroDims => {
+            ShapeZeroDims => {
                 write!(f, "shape cannot be constructed with 0 dims")
             }
-            Self::ShapeZeroLenDim { dims } => {
+            ShapeZeroLenDim { dims } => {
                 write!(f, "shape cannot have a dim of width 0, received {:?}", dims)
             }
-            Self::ShapeDataMisalignment {
-                shape_volume,
+            ShapeDataMisalignment {
+                volume: shape_volume,
                 data_len,
             } => {
                 write!(
@@ -78,36 +93,36 @@ impl Display for Error {
                     shape_volume, data_len
                 )
             }
-            Self::FromIdxFile { filename } => {
+            FromIdxFile { filename } => {
                 write!(f, "couldn't create array from file: {}", filename)
             }
-            Self::DerankIndexOutOfBounds { len, index } => {
+            DerankIndexOutOfBounds { len, index } => {
                 write!(f, "cannot derank at index {} when len is {}", index, len)
             }
-            Self::ReadNDim { ndims } => {
+            ReadNDim { ndims } => {
                 write!(f, "cannot read an individual value from an array with more than 1 dim, has {} dims", ndims)
             }
-            Self::Derank1D => {
+            Derank1D => {
                 write!(
                     f,
                     "cannot slice down to a smaller dimension from a 1D array"
                 )
             }
-            Self::SliceZeroWidth { index } => {
+            SliceZeroWidth { index } => {
                 write!(
                     f,
                     "slice cannot have 0 size, start: {i}, stop: {i}",
                     i = index
                 )
             }
-            Self::SliceStopBeforeStart { start, stop } => {
+            SliceStopBeforeStart { start, stop } => {
                 write!(
                     f,
                     "slice start, {}, cannot be greater than stop, {}",
                     start, stop
                 )
             }
-            Self::SliceStopPastEnd {
+            SliceStopPastEnd {
                 stop: slice_width,
                 dim: dim_width,
             } => {
@@ -117,17 +132,19 @@ impl Display for Error {
                     dim_width, slice_width
                 )
             }
-            Self::IdxIO { message } => f.write_str(&message),
-            Self::IdxReadUnaccepted => {
+            IdxIO { message } => f.write_str(&message),
+            IdxReadUnaccepted => {
                 write!(f, "reader no longer providing bytes")
             }
-            Self::IdxWriteUnaccepted => {
+            IdxWriteUnaccepted => {
                 write!(f, "writer no longer accepting bytes")
             }
-            Self::MismatchDTypeIDs { dtype1, dtype2 } => {
-                write!(f, "expected dtype ID: {}, found ID: {}", dtype1, dtype2)
+            IdxMismatchDTypeIDs { expected, actual } => {
+                write!(f, "expected dtype ID: {}, found ID: {}", expected, actual)
+            }
+            IdxMismatchNDims { expected, actual } => {
+                write!(f, "expected {} dims, found {} dims", expected, actual)
             }
         }
     }
 }
-
