@@ -19,7 +19,7 @@ pub enum Error {
     },
     ShapeDataMisalignment {
         volume: usize,
-        data_len: usize,
+        len: usize,
     },
     FromIdxFile {
         filename: &'static str,
@@ -85,7 +85,7 @@ impl Display for Error {
             }
             ShapeDataMisalignment {
                 volume: shape_volume,
-                data_len,
+                len: data_len,
             } => {
                 write!(
                     f,
