@@ -14,4 +14,7 @@ very risky tho, only do it once everything works
 
 https://doc.rust-lang.org/edition-guide/rust-2018/error-handling-and-panics/aborting-on-panic.html
 smaller binaries by not unwinding panics
+
+https://crates.io/crates/transpose
+todo: steal algorithm
 */

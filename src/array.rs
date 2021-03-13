@@ -8,21 +8,22 @@ use core::fmt::Debug;
 use core::iter::{repeat, Sum};
 use core::ops::{Add, Div, Mul, Sub};
 pub use error::{ArrResult, Error};
+use std::convert::TryInto;
 
-// helper function for compile time use
-pub const fn max_const(v1: usize, v2: usize) -> usize {
-    if v1 > v2 {
-        v1
+// helper functions for compile time use
+pub const fn max_const(a: usize, b: usize) -> usize {
+    if a > b {
+        a
     } else {
-        v2
+        b
     }
 }
 
-pub const fn min_const(v1: usize, v2: usize) -> usize {
-    if v1 < v2 {
-        v1
+pub const fn min_const(a: usize, b: usize) -> usize {
+    if a < b {
+        a
     } else {
-        v2
+        b
     }
 }
 
@@ -48,20 +49,22 @@ impl<T: ArrType, const NDIMS: usize> ArrayBase<T, NDIMS> {
 /// A view into an `ArrayBase` object
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Array<'base, T: ArrType, const NDIMS: usize> {
-    dims: [usize; NDIMS],
+    dims: [usize; NDIMS], // innermost first, outermost last
     data: &'base [T],
 }
 
 impl<'base, T: ArrType, const NDIMS: usize> Array<'base, T, NDIMS> {
+    /// Get the number of dimensions
+    pub fn ndims(&self) -> usize {
+        NDIMS
+    }
+
     /// Combine `Array`s of different sizes using array broadcasting
-    pub fn broadcast_combine<const NDIMS2: usize, F>(
+    pub fn broadcast_combine<const NDIMS2: usize, F: Fn(T, T) -> T>(
         &self,
         other: &Array<T, NDIMS2>,
         combinator: F,
-    ) -> ArrResult<ArrayBase<T, { max_const(NDIMS, NDIMS2) }>>
-    where
-        F: Fn(T, T) -> T,
-    {
+    ) -> ArrResult<ArrayBase<T, { max_const(NDIMS, NDIMS2) }>> {
         #[derive(Clone, Copy)]
         pub enum Instruction {
             PushLinear,
@@ -73,14 +76,14 @@ impl<'base, T: ArrType, const NDIMS: usize> Array<'base, T, NDIMS> {
         }
         use Instruction::*;
 
-        let (dims, instructions) = {
+        let (dims, instrs) = {
             let mut dims = [0; max_const(NDIMS, NDIMS2)];
-            let mut instructions = [PushLinear; max_const(NDIMS, NDIMS2)];
+            let mut instrs = [PushLinear; max_const(NDIMS, NDIMS2)];
 
             let (mut iter_a, mut iter_b) = (self.dims.iter(), other.dims.iter());
             let (mut stride_a, mut stride_b) = (1, 1);
 
-            for (dim, instruction) in dims.iter_mut().zip(instructions.iter_mut()) {
+            for (dim, instruction) in dims.iter_mut().zip(instrs.iter_mut()) {
                 let (next_a, next_b) = (iter_a.next(), iter_b.next());
 
                 let (d, i) = match (next_a, next_b) {
@@ -103,26 +106,26 @@ impl<'base, T: ArrType, const NDIMS: usize> Array<'base, T, NDIMS> {
                 *instruction = i;
             }
 
-            instructions[0] = match instructions[0] {
+            instrs[0] = match instrs[0] {
                 RecurseLinear { .. } => PushLinear,
                 RecurseStretchA { .. } => PushStretchA,
                 RecurseStretchB { .. } => PushStretchB,
                 _ => unreachable!(),
             };
 
-            (dims, instructions)
+            (dims, instrs)
         };
 
-        let mut data = Vec::with_capacity(dims.iter().product());
-
-        fn recurse<T, F>(a: &[T], b: &[T], instructions: &[Instruction], out: &mut Vec<T>, f: &F)
+        // take some data type that has some equivalent to iter() and chunks_exact()
+        // where iter returns values, and chunks_exact returns same type as current
+        fn recurse<T, F>(a: &[T], b: &[T], instrs: &[Instruction], out: &mut Vec<T>, f: &F)
         where
             T: ArrType,
             F: Fn(T, T) -> T,
         {
-            let (instruction, instructions2) = instructions.split_last().unwrap();
+            let (instr, instrs) = instrs.split_last().unwrap();
 
-            match *instruction {
+            match *instr {
                 PushLinear => {
                     out.extend(a.iter().zip(b.iter()).map(|(&a_n, &b_n)| f(a_n, b_n)));
                 }
@@ -134,23 +137,25 @@ impl<'base, T: ArrType, const NDIMS: usize> Array<'base, T, NDIMS> {
                 }
                 RecurseLinear { stride_a, stride_b } => {
                     for (a2, b2) in a.chunks_exact(stride_a).zip(b.chunks_exact(stride_b)) {
-                        recurse(a2, b2, instructions2, out, f);
+                        recurse(a2, b2, instrs, out, f);
                     }
                 }
                 RecurseStretchA { stride_b } => {
                     for b2 in b.chunks_exact(stride_b) {
-                        recurse(a, b2, instructions2, out, f);
+                        recurse(a, b2, instrs, out, f);
                     }
                 }
                 RecurseStretchB { stride_a } => {
                     for a2 in a.chunks_exact(stride_a) {
-                        recurse(a2, b, instructions2, out, f);
+                        recurse(a2, b, instrs, out, f);
                     }
                 }
             }
         }
 
-        recurse(self.data, other.data, &instructions, &mut data, &combinator);
+        let mut data = Vec::with_capacity(dims.iter().product());
+
+        recurse(self.data, other.data, &instrs, &mut data, &combinator);
 
         Ok(ArrayBase { dims, data })
     }
@@ -209,16 +214,18 @@ impl<'base, T: ArrType, const NDIMS: usize> Array<'base, T, NDIMS> {
 
                 Ok(ArrayBase {
                     dims: [cols_a; min_const(NDIMS, NDIMS2)],
-                    data: (self.data.chunks_exact(cols_a).zip(repeat(other.data)).map(
-                        |(a_row, b_col)| {
+                    data: self
+                        .data
+                        .chunks_exact(cols_a)
+                        .zip(repeat(other.data))
+                        .map(|(a_row, b_col)| {
                             a_row
                                 .iter()
                                 .zip(b_col.iter())
                                 .map(|(&a_val, &b_val)| a_val * b_val)
                                 .sum()
-                        },
-                    ))
-                    .collect(),
+                        })
+                        .collect(),
                 })
             }
             (1, 2) => {
@@ -226,7 +233,7 @@ impl<'base, T: ArrType, const NDIMS: usize> Array<'base, T, NDIMS> {
                 todo!()
             }
             (1, 1) => {
-                // vector vector
+                // vector vector (dot product)
                 let len_a = self.dims[0];
                 let len_b = other.dims[0];
                 if len_a != len_b {
@@ -249,6 +256,44 @@ impl<'base, T: ArrType, const NDIMS: usize> Array<'base, T, NDIMS> {
             _ => unreachable!(),
         }
     }
+
+    pub fn derank(&self, index: usize) -> ArrResult<Array<T, { NDIMS - 1 }>>
+    where
+        [(); NDIMS - 2]: ,
+    {
+        let (&len, dims_slice) = self.dims.split_last().unwrap();
+        if index >= len {
+            return Err(Error::DerankIndexOutOfBounds { len, index });
+        }
+
+        let stride = dims_slice.iter().product::<usize>();
+
+        Ok(Array {
+            dims: dims_slice.try_into().unwrap(),
+            data: &self.data[stride * index..stride * (index + 1)],
+        })
+    }
+
+    pub fn slice(&self, start: usize, stop: usize) -> ArrResult<Self> {
+        let (&len, dims_slice) = self.dims.split_last().unwrap();
+        if stop < start {
+            return Err(Error::SliceStopBeforeStart { start, stop });
+        } else if stop == start {
+            return Err(Error::SliceZeroWidth { index: start });
+        } else if stop > len {
+            return Err(Error::SliceStopPastEnd { stop, len });
+        }
+
+        let stride = dims_slice.iter().product::<usize>();
+
+        let mut dims = self.dims.clone();
+        *dims.last_mut().unwrap() = stop - start;
+
+        Ok(Array {
+            dims,
+            data: &self.data[stride * start..stride * stop],
+        })
+    }
 }
 
 pub trait ArrType:
@@ -263,4 +308,9 @@ pub trait ArrType:
 {
 }
 
-impl_arraytype! { u8, i8, i16, i32, f32, f64 }
+impl ArrType for u8 {}
+impl ArrType for i8 {}
+impl ArrType for i16 {}
+impl ArrType for i32 {}
+impl ArrType for f32 {}
+impl ArrType for f64 {}
