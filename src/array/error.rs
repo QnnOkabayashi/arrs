@@ -41,7 +41,7 @@ pub enum Error {
     },
     SliceStopPastEnd {
         stop: usize,
-        dim: usize,
+        len: usize,
     },
     IdxIO {
         // io::Error doesn't impl PartialEq, which is annoying
@@ -124,7 +124,7 @@ impl Display for Error {
             }
             SliceStopPastEnd {
                 stop: slice_width,
-                dim: dim_width,
+                len: dim_width,
             } => {
                 write!(
                     f,

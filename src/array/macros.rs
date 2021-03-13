@@ -1,18 +1,10 @@
-macro_rules! impl_arraytype {
-    { $( $inner_type:tt ),* } => {
-        $(
-            impl ArrType for $inner_type {}
-        )*
-    }
-}
-
 #[macro_export]
 macro_rules! arrs {
     ( let $name:ident = View($base:expr) ) => {
         let $name = crate::array::Array::from_base(&$base);
     };
     ( let $name:ident = Array($dims:expr, $data:expr) ) => {
-        let $name = crate::array::ArrayBase::new($dims, $data.to_vec())?;
+        let $name = crate::array::ArrayBase::new($dims, $data)?;
         arrs!(let $name = View($name));
     };
     ( let $name:ident = IDX($filename:expr) ) => {
