@@ -1,131 +1,266 @@
-mod dense;
 mod error;
-mod shape;
-mod traits;
-pub use dense::Array as DenseArray;
+#[cfg(not(no_std))]
+mod idx;
+// mod shape;
+#[macro_use]
+mod macros;
+use core::fmt::Debug;
+use core::iter::{repeat, Sum};
+use core::ops::{Add, Div, Mul, Sub};
 pub use error::{ArrResult, Error};
-use shape::BroadcastInstruction;
-pub use shape::{Shape, ShapeBase};
-pub use traits::{MultiDimensional, PartialView, TypeAware};
 
-pub struct ArrayBase<T: TypeAware> {
-    shape_base: ShapeBase,
+// helper function for compile time use
+pub const fn max_const(v1: usize, v2: usize) -> usize {
+    if v1 > v2 {
+        v1
+    } else {
+        v2
+    }
+}
+
+pub const fn min_const(v1: usize, v2: usize) -> usize {
+    if v1 < v2 {
+        v1
+    } else {
+        v2
+    }
+}
+
+/// A base for owning `Array` data
+pub struct ArrayBase<T: ArrType, const NDIMS: usize> {
+    dims: [usize; NDIMS],
     data: Vec<T>,
 }
 
-impl<T: TypeAware> ArrayBase<T> {
-    pub fn new_checked(dims: Vec<usize>, data: Vec<T>) -> ArrResult<Self> {
-        let shape_base = ShapeBase::new_checked(dims)?;
-
-        if shape_base.total_volume() != data.len() {
-            return Err(Error::ShapeDataMisalignment {
-                shape_volume: shape_base.total_volume(),
-                data_len: data.len(),
-            });
+impl<T: ArrType, const NDIMS: usize> ArrayBase<T, NDIMS> {
+    pub fn new(dims: [usize; NDIMS], data: Vec<T>) -> ArrResult<Self> {
+        let (volume, len) = (dims.iter().product(), data.len());
+        if NDIMS == 0 {
+            Err(Error::ShapeZeroDims)
+        } else if volume != len {
+            Err(Error::ShapeDataMisalignment { volume, len })
+        } else {
+            Ok(Self { dims, data })
         }
-
-        Ok(Self { shape_base, data })
     }
 }
 
-#[cfg(not(no_std))]
-mod idx {
-    use crate::array::{ArrResult, ArrayBase, Error, ShapeBase, TypeAware};
-    use std::fs::File;
-    use std::io::{Read, Write, Error as IoError};
+/// A view into an `ArrayBase` object
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Array<'base, T: ArrType, const NDIMS: usize> {
+    dims: [usize; NDIMS],
+    data: &'base [T],
+}
 
-    pub trait IdxType: TypeAware {
-        const ID: u8;
+impl<'base, T: ArrType, const NDIMS: usize> Array<'base, T, NDIMS> {
+    /// Combine `Array`s of different sizes using array broadcasting
+    pub fn broadcast_combine<const NDIMS2: usize, F>(
+        &self,
+        other: &Array<T, NDIMS2>,
+        combinator: F,
+    ) -> ArrResult<ArrayBase<T, { max_const(NDIMS, NDIMS2) }>>
+    where
+        F: Fn(T, T) -> T,
+    {
+        #[derive(Clone, Copy)]
+        pub enum Instruction {
+            PushLinear,
+            PushStretchA,
+            PushStretchB,
+            RecurseLinear { stride_a: usize, stride_b: usize },
+            RecurseStretchA { stride_b: usize },
+            RecurseStretchB { stride_a: usize },
+        }
+        use Instruction::*;
 
-        fn read<R: Read>(reader: &mut R) -> ArrResult<Self>;
+        let (dims, instructions) = {
+            let mut dims = [0; max_const(NDIMS, NDIMS2)];
+            let mut instructions = [PushLinear; max_const(NDIMS, NDIMS2)];
 
-        fn write<W: Write>(&self, writer: &mut W) -> ArrResult<()>;
-    }
+            let (mut iter_a, mut iter_b) = (self.dims.iter(), other.dims.iter());
+            let (mut stride_a, mut stride_b) = (1, 1);
 
-    macro_rules! impl_idxtype {
-        { $( ( $inner_type:tt, $size:expr, $id:expr ) ),* } => {
-            $(
-                impl IdxType for $inner_type {
-                    const ID: u8 = $id;
+            for (dim, instruction) in dims.iter_mut().zip(instructions.iter_mut()) {
+                let (next_a, next_b) = (iter_a.next(), iter_b.next());
 
-                    fn read<R: Read>(reader: &mut R) -> ArrResult<Self> {
-                        let mut buf = [0; $size];
-                        if reader.read(&mut buf)? < $size {
-                            return Err(Error::IdxReadUnaccepted);
-                        }
-
-                        Ok(Self::from_be_bytes(buf))
+                let (d, i) = match (next_a, next_b) {
+                    (Some(&a), Some(&b)) if a == b => (a, RecurseLinear { stride_a, stride_b }),
+                    (Some(&a), Some(1)) | (Some(&a), None) => (a, RecurseStretchB { stride_a }),
+                    (Some(1), Some(&b)) | (None, Some(&b)) => (b, RecurseStretchA { stride_b }),
+                    (None, None) => unreachable!(),
+                    _ => {
+                        return Err(Error::Broadcast {
+                            dims1: self.dims.to_vec(),
+                            dims2: other.dims.to_vec(),
+                        })
                     }
+                };
 
-                    fn write<W: Write>(&self, writer: &mut W) -> ArrResult<()> {
-                        let buf = self.to_be_bytes();
-                        if writer.write(&buf)? < $size {
-                            return Err(Error::IdxWriteUnaccepted);
-                        }
+                stride_a *= next_a.unwrap_or(&1);
+                stride_b *= next_b.unwrap_or(&1);
 
-                        Ok(())
+                *dim = d;
+                *instruction = i;
+            }
+
+            instructions[0] = match instructions[0] {
+                RecurseLinear { .. } => PushLinear,
+                RecurseStretchA { .. } => PushStretchA,
+                RecurseStretchB { .. } => PushStretchB,
+                _ => unreachable!(),
+            };
+
+            (dims, instructions)
+        };
+
+        let mut data = Vec::with_capacity(dims.iter().product());
+
+        fn recurse<T, F>(a: &[T], b: &[T], instructions: &[Instruction], out: &mut Vec<T>, f: &F)
+        where
+            T: ArrType,
+            F: Fn(T, T) -> T,
+        {
+            let (instruction, instructions2) = instructions.split_last().unwrap();
+
+            match *instruction {
+                PushLinear => {
+                    out.extend(a.iter().zip(b.iter()).map(|(&a_n, &b_n)| f(a_n, b_n)));
+                }
+                PushStretchA => {
+                    out.extend(b.iter().map(|&b_n| f(a[0], b_n)));
+                }
+                PushStretchB => {
+                    out.extend(a.iter().map(|&a_n| f(a_n, b[0])));
+                }
+                RecurseLinear { stride_a, stride_b } => {
+                    for (a2, b2) in a.chunks_exact(stride_a).zip(b.chunks_exact(stride_b)) {
+                        recurse(a2, b2, instructions2, out, f);
                     }
                 }
-            )*
+                RecurseStretchA { stride_b } => {
+                    for b2 in b.chunks_exact(stride_b) {
+                        recurse(a, b2, instructions2, out, f);
+                    }
+                }
+                RecurseStretchB { stride_a } => {
+                    for a2 in a.chunks_exact(stride_a) {
+                        recurse(a2, b, instructions2, out, f);
+                    }
+                }
+            }
+        }
+
+        recurse(self.data, other.data, &instructions, &mut data, &combinator);
+
+        Ok(ArrayBase { dims, data })
+    }
+
+    /// Convert the data type
+    pub fn as_type<R: ArrType + From<T>>(&self) -> ArrayBase<R, NDIMS> {
+        ArrayBase {
+            dims: self.dims,
+            data: self.data.iter().map(|x| R::from(*x)).collect(),
         }
     }
 
-    impl_idxtype! {
-        (u8, 1, 0x08),
-        (i8, 1, 0x09),
-        (i16, 2, 0x0B),
-        (i32, 4, 0x0C),
-        (f32, 4, 0x0D),
-        (f64, 8, 0x0E)
-    }
-
-    impl<T: IdxType> ArrayBase<T> {
-        pub fn from_idx(filename: &'static str) -> ArrResult<Self> {
-            let mut file = File::open(filename)?;
-            let mut magic = [0; 4];
-            if file.read(&mut magic)? < 4 {
-                return Err(Error::IdxReadUnaccepted);
-            }
-
-            let magic_dtype = magic[2];
-            if magic_dtype != T::ID {
-                return Err(Error::MismatchDTypeIDs {
-                    dtype1: T::ID,
-                    dtype2: magic_dtype,
-                });
-            }
-
-            let ndims = magic[3] as usize;
-
-            let mut dims = Vec::with_capacity(ndims);
-            for _ in 0..ndims {
-                dims.push(<i32 as IdxType>::read(&mut file)? as usize);
-            }
-
-            let shape_base = ShapeBase::new_checked(dims)?;
-            let volume = shape_base.total_volume();
-
-            let mut data = Vec::with_capacity(volume);
-            for _ in 0..volume {
-                data.push(<T as IdxType>::read(&mut file)?);
-            }
-
-            Ok(Self { shape_base, data })
-        }
-
-        pub fn into_idx(&self, filename: &'static str) -> ArrResult<()> {
-            unimplemented!(
-                "can't read '{}' because this function isn't implemented",
-                filename
-            )
+    /// Generate fresh `Array` from an `ArrayBase`
+    pub fn from_base(base: &'base ArrayBase<T, NDIMS>) -> Self {
+        Self {
+            dims: base.dims,
+            data: &base.data[..],
         }
     }
 
-    impl From<IoError> for Error {
-        fn from(err: IoError) -> Self {
-            Self::IdxIO {
-                message: err.to_string(),
+    /// Generate fresh `ArrayBase` from this `Array`
+    pub fn into_base(&self) -> ArrayBase<T, NDIMS> {
+        ArrayBase {
+            dims: self.dims,
+            data: self.data.to_vec(),
+        }
+    }
+
+    /// Matrix multiplication for 2x2, 2x1, 1x2, and 1x1 `Array`s
+    pub fn matmul<const NDIMS2: usize>(
+        &self,
+        other: &Array<T, NDIMS2>,
+    ) -> ArrResult<ArrayBase<T, { min_const(NDIMS, NDIMS2) }>>
+    where
+        [(); 2 - NDIMS]: , // at most 2
+        [(); NDIMS - 1]: , // at least 1
+        [(); 2 - NDIMS2]: ,
+        [(); NDIMS2 - 1]: ,
+    {
+        // can probably figure out which one at compile time
+        match (NDIMS, NDIMS2) {
+            (2, 2) => {
+                // matrix matrix
+                todo!()
             }
+            (2, 1) => {
+                // matrix vector
+                let (rows_a, cols_a) = (self.dims[0], self.dims[1]);
+                let len_b = other.dims[0];
+                if rows_a != len_b {
+                    return Err(Error::MatMul {
+                        rows_a,
+                        cols_b: len_b,
+                    });
+                }
+
+                Ok(ArrayBase {
+                    dims: [cols_a; min_const(NDIMS, NDIMS2)],
+                    data: (self.data.chunks_exact(cols_a).zip(repeat(other.data)).map(
+                        |(a_row, b_col)| {
+                            a_row
+                                .iter()
+                                .zip(b_col.iter())
+                                .map(|(&a_val, &b_val)| a_val * b_val)
+                                .sum()
+                        },
+                    ))
+                    .collect(),
+                })
+            }
+            (1, 2) => {
+                // vector matrix
+                todo!()
+            }
+            (1, 1) => {
+                // vector vector
+                let len_a = self.dims[0];
+                let len_b = other.dims[0];
+                if len_a != len_b {
+                    return Err(Error::MatMul {
+                        rows_a: len_a,
+                        cols_b: len_b,
+                    });
+                }
+
+                Ok(ArrayBase {
+                    dims: [1; min_const(NDIMS, NDIMS2)], // always 1 length
+                    data: vec![self
+                        .data
+                        .iter()
+                        .zip(other.data.iter())
+                        .map(|(&a, &b)| a * b)
+                        .sum()],
+                })
+            }
+            _ => unreachable!(),
         }
     }
 }
+
+pub trait ArrType:
+    Copy
+    + PartialEq
+    + Debug
+    + Sum
+    + Add<Output = Self>
+    + Sub<Output = Self>
+    + Mul<Output = Self>
+    + Div<Output = Self>
+{
+}
+
+impl_arraytype! { u8, i8, i16, i32, f32, f64 }
