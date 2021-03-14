@@ -1,11 +1,16 @@
 #![allow(incomplete_features)]
 #![feature(const_generics)]
 #![feature(const_evaluatable_checked)]
+#![feature(generic_associated_types)]
 
+pub mod base;
+pub mod error;
+pub mod types;
+pub mod view;
 #[macro_use]
-pub mod array;
-pub mod tests;
+pub mod macros;
 
+pub mod tests;
 /*
 https://stackoverflow.com/a/57259339/12401179
 enable no-aliasing (Fortran style)
