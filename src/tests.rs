@@ -1,5 +1,6 @@
 mod array_tests {
-    use crate::array::ArrResult;
+    use crate::error::ArrResult;
+    use crate::view::MultiDimensional;
 
     #[test]
     fn eq1() -> ArrResult<()> {
@@ -159,7 +160,8 @@ mod array_tests {
 }
 
 mod derank_slice_tests {
-    use crate::array::{ArrResult, Error};
+    use crate::error::{ArrResult, Error};
+    use crate::view::MultiDimensional;
 
     #[test]
     fn test_derank_0() -> ArrResult<()> {
@@ -196,7 +198,7 @@ mod derank_slice_tests {
         arrs!(let arr = Array([2, 3], vec![0, 1, 2, 3, 4, 5]));
 
         arrs!(let expected = Array([2, 2], vec![0, 1, 2, 3]));
-        let actual = arr.slice(0, 2)?;
+        let actual = arr.slice(0..2)?;
 
         Ok(assert_eq!(expected, actual))
     }
@@ -206,7 +208,7 @@ mod derank_slice_tests {
         arrs!(let arr = Array([2, 3], vec![0, 1, 2, 3, 4, 5]));
 
         arrs!(let expected = Array([2, 2], vec![2, 3, 4, 5]));
-        let actual = arr.slice(1, 3)?;
+        let actual = arr.slice(1..3)?;
 
         Ok(assert_eq!(expected, actual))
     }
@@ -216,7 +218,7 @@ mod derank_slice_tests {
         arrs!(let arr = Array([2, 3], vec![0, 1, 2, 3, 4, 5]));
 
         let expected = Error::SliceZeroWidth { index: 1 };
-        let actual = arr.slice(1, 1).unwrap_err();
+        let actual = arr.slice(1..1).unwrap_err();
 
         Ok(assert_eq!(expected, actual))
     }
@@ -225,8 +227,8 @@ mod derank_slice_tests {
     fn test_slice_err_stop_before_step() -> ArrResult<()> {
         arrs!(let arr = Array([2, 3], vec![0, 1, 2, 3, 4, 5]));
 
-        let expected = Error::SliceStopBeforeStart { start: 2, stop: 1 };
-        let actual = arr.slice(2, 1).unwrap_err();
+        let expected = Error::SliceNonConverging { start: 2, end: 1, step: 1 };
+        let actual = arr.slice(2..1).unwrap_err();
 
         Ok(assert_eq!(expected, actual))
     }
@@ -235,8 +237,8 @@ mod derank_slice_tests {
     fn test_slice_err_stop_past_end() -> ArrResult<()> {
         arrs!(let arr = Array([2, 3], vec![0, 1, 2, 3, 4, 5]));
 
-        let expected = Error::SliceStopPastEnd { stop: 4, len: 3 };
-        let actual = arr.slice(2, 4).unwrap_err();
+        let expected = Error::SliceEndOutOfBounds { end: 4, len: 3 };
+        let actual = arr.slice(2..4).unwrap_err();
 
         Ok(assert_eq!(expected, actual))
     }
@@ -246,7 +248,7 @@ mod derank_slice_tests {
         arrs!(let arr = Array([2, 3], vec![0, 1, 2, 3, 4, 5]));
 
         arrs!(let expected = Array([2], vec![2, 3]));
-        let sliced = arr.slice(1, 3)?;
+        let sliced = arr.slice(1..3)?;
         let deranked = sliced.derank(0)?;
 
         Ok(assert_eq!(expected, deranked))
@@ -255,17 +257,17 @@ mod derank_slice_tests {
 
 /*
 mod array_idx_tests {
-    use crate::array::{ArrResult, Shape};
+    use crate::error::ArrResult;
 
     #[test]
     fn read_correct_ndims() -> ArrResult<()> {
-        arrs!(let _test_imgs = IDX("idx-files/t10k-images-idx3-ubyte"));
+        arrs!(let _test_imgs = MNIST("idx-files/t10k-images-idx3-ubyte"));
         Ok(())
     }
 
     #[test]
     fn read_correct_dims() -> ArrResult<()> {
-        arrs!(let test_imgs = IDX("idx-files/t10k-images-idx3-ubyte"));
+        arrs!(let test_imgs = MNIST("idx-files/t10k-images-idx3-ubyte"));
         let expected = Shape::new([10000, 28, 28])?;
 
         Ok(assert_eq!(&expected, test_imgs.shape()))
